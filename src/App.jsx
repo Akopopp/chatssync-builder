@@ -210,7 +210,7 @@ function Dashboard({ onEdit }) {
                 <button style={{ ...btnGhost, padding: "6px 14px" }} onClick={() => onEdit(f.id)}>Edit</button>
                 <button onClick={() => setMenuOpen(menuOpen === f.id ? null : f.id)} style={{ width: 32, height: 32, border: `1px solid ${T.border}`, borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 18, lineHeight: "16px", color: T.sub }}>⋮</button>
                 {menuOpen === f.id && (
-                  <div style={{ position: "absolute", top: 38, right: 0, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,.12)", zIndex: 20, minWidth: 150, overflow: "hidden" }}>
+                  <div style={{ position: "absolute", top: 40, right: 0, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,.15)", zIndex: 100, minWidth: 160, overflow: "hidden" }}>
                     {[["Edit", () => { setMenuOpen(null); onEdit(f.id); }], ["Duplicate", () => duplicate(f)], ["Export", () => exportBot(f)], ["Delete", () => { setMenuOpen(null); setConfirmDel(f); }]].map(([lbl, fn]) => (
                       <div key={lbl} onClick={fn} style={{ padding: "10px 14px", fontSize: 13, cursor: "pointer", color: lbl === "Delete" ? "#dc2626" : T.text, borderTop: lbl === "Delete" ? `1px solid ${T.border}` : "none" }} onMouseEnter={(e) => (e.currentTarget.style.background = T.soft)} onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}>{lbl}</div>
                     ))}
