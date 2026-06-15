@@ -1,12 +1,12 @@
-import { useCallback, useRef, useState, useEffect } from "react";
+import { useCallback, useRef, useState, useEffect, createContext, useContext } from "react";
 import ReactFlow, {
   Background, Controls, MiniMap, addEdge,
   useNodesState, useEdgesState, Handle, Position,
+  BaseEdge, EdgeLabelRenderer, getBezierPath,
 } from "reactflow";
 import "reactflow/dist/style.css";
 
-// Engine API base + account (env se; fallback hardcoded)
-const API = (import.meta.env.VITE_API_URL || "https://kkzof1hiq0af5vngi0v689zi.5.75.237.171.sslip.io").replace(/\/$/, "");
+const API = (import.meta.env.VITE_API_URL || "http://kkzof1hiq0af5vngi0v689zi.5.75.237.171.sslip.io").replace(/\/$/, "");
 const ACCOUNT_ID = parseInt(import.meta.env.VITE_ACCOUNT_ID || "3", 10);
 
 const C = { start: "#0EA5E9", text: "#2781F6", buttons: "#16A34A", question: "#9333EA", stop: "#DC2626" };
@@ -14,6 +14,9 @@ const box = (sel) => ({ background: "#fff", borderRadius: 10, width: 230, border
 const head = (bg) => ({ background: bg, color: "#fff", padding: "8px 10px", fontWeight: 700, fontSize: 12 });
 const body = { padding: 10, color: "#334155", whiteSpace: "pre-wrap", minHeight: 18, lineHeight: 1.4 };
 const btnRow = { position: "relative", margin: "6px 10px", padding: "6px 24px 6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, background: "#f1f5f9", color: "#1e293b" };
+
+// Context taake edge ka cross parent ke setEdges ko call kar sake
+const EdgeCtx = createContext(null);
 
 function StartNode({ data }) {
   return (<div style={box(false)}><div style={head(C.start)}>⚡ On Message (Start)</div><div style={body}>{data.keywords ? `Keywords: ${data.keywords}` : "Pehle message par flow shuru"}</div><Handle type="source" position={Position.Bottom} /></div>);
@@ -35,6 +38,25 @@ function StopNode({ data, selected }) {
 }
 const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, question: QuestionNode, stop: StopNode };
 
+// ===== Deletable edge (beech mein ✕) =====
+function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }) {
+  const { onDeleteEdge } = useContext(EdgeCtx) || {};
+  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{ ...style, stroke: "#94a3b8", strokeWidth: 2 }} />
+      <EdgeLabelRenderer>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDeleteEdge && onDeleteEdge(id); }}
+          title="Connection hatao"
+          style={{ position: "absolute", transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all", width: 20, height: 20, borderRadius: "50%", border: "2px solid #fff", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 11, lineHeight: "16px", boxShadow: "0 1px 4px rgba(0,0,0,.35)", padding: 0 }}
+        >✕</button>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+const edgeTypes = { deletable: DeletableEdge };
+
 function defaultData(kind) {
   if (kind === "text") return { text: "Apna message yahan likhein…" };
   if (kind === "buttons") return { text: "Customer ko kya poochna hai?", buttons: [{ title: "Option 1" }, { title: "Option 2" }] };
@@ -50,45 +72,26 @@ const PALETTE = [
 ];
 const initialNodes = [{ id: "start", type: "start", position: { x: 320, y: 40 }, data: { keywords: "" }, deletable: false }];
 
-// ============ CONVERTERS ============
-// Builder (nodes+edges) -> engine format {start, nodes}
 function toEngineFormat(nodes, edges) {
   const def = { start: null, nodes: {} };
-  // edge map: source(+handle) -> target
-  const plainNext = {}; // nodeId -> targetId (single handle: text/question/start)
-  const btnNext = {};   // nodeId -> { handleId -> targetId }
+  const plainNext = {}; const btnNext = {};
   for (const e of edges) {
-    if (e.sourceHandle && e.sourceHandle.startsWith("btn-")) {
-      btnNext[e.source] = btnNext[e.source] || {};
-      btnNext[e.source][e.sourceHandle] = e.target;
-    } else {
-      plainNext[e.source] = e.target;
-    }
+    if (e.sourceHandle && e.sourceHandle.startsWith("btn-")) { btnNext[e.source] = btnNext[e.source] || {}; btnNext[e.source][e.sourceHandle] = e.target; }
+    else plainNext[e.source] = e.target;
   }
-  // start = jis node se "start" connect hota hai
   def.start = plainNext["start"] || null;
-
   for (const n of nodes) {
     if (n.type === "start") continue;
-    if (n.type === "text") {
-      def.nodes[n.id] = { type: "text", text: n.data.text || "", next: plainNext[n.id] || null };
-    } else if (n.type === "question") {
-      def.nodes[n.id] = { type: "question", text: n.data.text || "", save_as: n.data.saveAs || "answer", next: plainNext[n.id] || null };
-    } else if (n.type === "stop") {
-      def.nodes[n.id] = { type: "handover", text: n.data.text || "" };
-    } else if (n.type === "buttons") {
-      const buttons = (n.data.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null }));
-      def.nodes[n.id] = { type: "buttons", text: n.data.text || "", buttons };
-    }
+    if (n.type === "text") def.nodes[n.id] = { type: "text", text: n.data.text || "", next: plainNext[n.id] || null };
+    else if (n.type === "question") def.nodes[n.id] = { type: "question", text: n.data.text || "", save_as: n.data.saveAs || "answer", next: plainNext[n.id] || null };
+    else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: n.data.text || "" };
+    else if (n.type === "buttons") def.nodes[n.id] = { type: "buttons", text: n.data.text || "", buttons: (n.data.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null })) };
   }
   return def;
 }
-
-// Engine format -> builder (nodes+edges) for loading
 function fromEngineFormat(def) {
   const nodes = [{ id: "start", type: "start", position: { x: 320, y: 40 }, data: { keywords: "" }, deletable: false }];
-  const edges = [];
-  let y = 200;
+  const edges = []; let y = 200;
   const ids = Object.keys(def.nodes || {});
   ids.forEach((id, idx) => {
     const node = def.nodes[id];
@@ -99,16 +102,10 @@ function fromEngineFormat(def) {
     if (kind === "stop") data.text = node.text || "";
     if (kind === "buttons") { data.text = node.text || ""; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     nodes.push({ id, type: kind, position: { x: 320 + (idx % 2) * 300, y: y + idx * 120 }, data });
-
-    // edges
-    if (kind === "buttons") {
-      (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, animated: true }); });
-    } else if (node.next) {
-      edges.push({ id: `e-${id}`, source: id, target: node.next, animated: true });
-    }
+    if (kind === "buttons") (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); });
+    else if (node.next) edges.push({ id: `e-${id}`, source: id, target: node.next, type: "deletable", animated: true });
   });
-  // start edge
-  if (def.start) edges.push({ id: "e-start", source: "start", target: def.start, animated: true });
+  if (def.start) edges.push({ id: "e-start", source: "start", target: def.start, type: "deletable", animated: true });
   return { nodes, edges };
 }
 
@@ -119,7 +116,6 @@ export default function App() {
   const [status, setStatus] = useState("Loading…");
   const idRef = useRef(1);
 
-  // Load existing flow on open
   useEffect(() => {
     (async () => {
       try {
@@ -127,21 +123,15 @@ export default function App() {
         const j = await r.json();
         if (j.flow && j.flow.definition) {
           const { nodes: n, edges: e } = fromEngineFormat(j.flow.definition);
-          setNodes(n); setEdges(e);
-          // id counter ko bara karo taake naye ids clash na karein
-          idRef.current = n.length + 5;
+          setNodes(n); setEdges(e); idRef.current = n.length + 5;
           setStatus(`Loaded (${j.flow.status})`);
-        } else {
-          setStatus("New flow");
-        }
-      } catch (err) {
-        setStatus("Load failed");
-        console.error(err);
-      }
+        } else setStatus("New flow");
+      } catch (err) { setStatus("Load failed"); console.error(err); }
     })();
   }, []);
 
-  const onConnect = useCallback((p) => setEdges((eds) => addEdge({ ...p, animated: true }, eds)), [setEdges]);
+  const onConnect = useCallback((p) => setEdges((eds) => addEdge({ ...p, type: "deletable", animated: true }, eds)), [setEdges]);
+  const onDeleteEdge = useCallback((id) => setEdges((es) => es.filter((e) => e.id !== id)), [setEdges]);
 
   const addNode = (kind) => {
     const id = `n${++idRef.current}`;
@@ -155,13 +145,9 @@ export default function App() {
     if (!definition.start) { setStatus("⚠️ Start kisi node se connect karein"); return; }
     setStatus(publish ? "Publishing…" : "Saving…");
     try {
-      const r = await fetch(`${API}/api/flow`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: ACCOUNT_ID, name: "My flow", definition, publish }),
-      });
+      const r = await fetch(`${API}/api/flow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: "My flow", definition, publish }) });
       const j = await r.json();
-      if (j.ok) setStatus(publish ? "✅ Published (live)" : "✅ Saved (draft)");
-      else setStatus("Error: " + (j.error || "unknown"));
+      if (j.ok) setStatus(publish ? "✅ Published (live)" : "✅ Saved (draft)"); else setStatus("Error: " + (j.error || "unknown"));
     } catch (err) { setStatus("Save failed"); console.error(err); }
   }
 
@@ -179,16 +165,16 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ width: 210, background: "#f8fafc", borderRight: "1px solid #e2e8f0", padding: 12, overflowY: "auto" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 8, textTransform: "uppercase" }}>Actions</div>
-          {PALETTE.map((p) => (
-            <button key={p.kind} onClick={() => addNode(p.kind)} style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 8, padding: "10px 12px", border: "1px solid #e2e8f0", borderLeft: `4px solid ${p.color}`, borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 13, color: "#1e293b" }}>{p.label}</button>
-          ))}
-          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>Node add → connect → edit. Phir <b>Publish</b> dabायें — bot live chalega.</div>
+          {PALETTE.map((p) => (<button key={p.kind} onClick={() => addNode(p.kind)} style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 8, padding: "10px 12px", border: "1px solid #e2e8f0", borderLeft: `4px solid ${p.color}`, borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 13, color: "#1e293b" }}>{p.label}</button>))}
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>Connection hatane ke liye line ke beech wale <b style={{ color: "#dc2626" }}>✕</b> par click karein.</div>
         </div>
 
         <div style={{ flex: 1, background: "#0f1115" }}>
-          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} onNodeClick={(_, n) => setSelectedId(n.id)} onPaneClick={() => setSelectedId(null)} fitView>
-            <Background color="#333" gap={16} /><Controls /><MiniMap pannable zoomable />
-          </ReactFlow>
+          <EdgeCtx.Provider value={{ onDeleteEdge }}>
+            <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => setSelectedId(n.id)} onPaneClick={() => setSelectedId(null)} fitView>
+              <Background color="#333" gap={16} /><Controls /><MiniMap pannable zoomable />
+            </ReactFlow>
+          </EdgeCtx.Provider>
         </div>
 
         <div style={{ width: 290, background: "#fff", borderLeft: "1px solid #e2e8f0", padding: 16, overflowY: "auto" }}>
