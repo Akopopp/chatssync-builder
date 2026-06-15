@@ -10,10 +10,8 @@ const params = new URLSearchParams(window.location.search);
 const API = (import.meta.env.VITE_API_URL || "http://kkzof1hiq0af5vngi0v689zi.5.75.237.171.sslip.io").replace(/\/$/, "");
 const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACCOUNT_ID || "3", 10);
 
-// ---- Theme (Chatwoot-ish) ----
 const T = {
-  blue: "#1f93ff", blueDark: "#1872cc",
-  text: "#1f2d3d", sub: "#64748b", border: "#e5e7eb",
+  blue: "#1f93ff", text: "#1f2d3d", sub: "#64748b", border: "#e5e7eb",
   bg: "#ffffff", soft: "#f8fafc",
   green: "#15803d", greenBg: "#e7f7ee", grayPill: "#64748b", grayPillBg: "#f1f5f9",
   font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
@@ -28,7 +26,6 @@ function injectFont() {
   document.body.style.margin = "0"; document.body.style.fontFamily = T.font;
 }
 
-// ===================== NODE COMPONENTS (canvas) =====================
 const box = (sel) => ({ background: "#fff", borderRadius: 10, width: 230, border: sel ? `2px solid ${T.blue}` : "1px solid #e2e8f0", boxShadow: "0 2px 6px rgba(0,0,0,.08)", fontFamily: T.font, fontSize: 12, overflow: "hidden" });
 const head = (bg) => ({ background: bg, color: "#fff", padding: "8px 10px", fontWeight: 600, fontSize: 12 });
 const nbody = { padding: 10, color: "#334155", whiteSpace: "pre-wrap", minHeight: 18, lineHeight: 1.4 };
@@ -105,7 +102,6 @@ function fromEngineFormat(def) {
   return { nodes, edges };
 }
 
-// ========================= TOP-LEVEL APP =========================
 export default function App() {
   const [view, setView] = useState("dashboard");
   const [editId, setEditId] = useState(null);
@@ -114,12 +110,12 @@ export default function App() {
   return <Dashboard onEdit={(id) => { setEditId(id); setView("editor"); }} />;
 }
 
-// ========================= DASHBOARD =========================
 function Dashboard({ onEdit }) {
   const [flows, setFlows] = useState(null);
   const [inboxes, setInboxes] = useState([]);
-  const [menuOpen, setMenuOpen] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(null); // {id,x,y}
   const [confirmDel, setConfirmDel] = useState(null);
+  const [pendingInbox, setPendingInbox] = useState({}); // id -> chosen value (unsaved)
   const [msg, setMsg] = useState("");
   const fileRef = useRef(null);
 
@@ -129,42 +125,18 @@ function Dashboard({ onEdit }) {
   };
   useEffect(() => { load(); }, []);
 
-  const createBot = async () => {
-    try { const j = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: "New chatbot" }) })).json(); if (j.ok) onEdit(j.flow.id); } catch { setMsg("Create failed"); }
-  };
-  const duplicate = async (f) => {
-    setMenuOpen(null);
+  const createBot = async () => { try { const j = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: "New chatbot" }) })).json(); if (j.ok) onEdit(j.flow.id); } catch { setMsg("Create failed"); } };
+  const duplicate = async (f) => { setMenuOpen(null); try { const full = await (await fetch(`${API}/api/flows/${f.id}`)).json(); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: (f.name || "Chatbot") + " (copy)" }) })).json(); if (cr.ok) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: full.flow.definition }) }); await load(); } catch { setMsg("Duplicate failed"); } };
+  const exportBot = async (f) => { setMenuOpen(null); try { const full = await (await fetch(`${API}/api/flows/${f.id}`)).json(); const blob = new Blob([JSON.stringify({ name: full.flow.name, definition: full.flow.definition }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${(f.name || "chatbot").replace(/\s+/g, "-")}.json`; a.click(); URL.revokeObjectURL(url); } catch { setMsg("Export failed"); } };
+  const doDelete = async () => { const f = confirmDel; setConfirmDel(null); if (!f) return; try { await fetch(`${API}/api/flows/${f.id}`, { method: "DELETE" }); await load(); } catch { setMsg("Delete failed"); } };
+  const importBot = async (e) => { const file = e.target.files?.[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: data.name || "Imported chatbot" }) })).json(); if (cr.ok && data.definition) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: data.definition }) }); await load(); } catch { setMsg("Import failed — galat JSON"); } e.target.value = ""; };
+  const saveInbox = async (f) => {
+    const val = pendingInbox[f.id];
     try {
-      const full = await (await fetch(`${API}/api/flows/${f.id}`)).json();
-      const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: (f.name || "Chatbot") + " (copy)" }) })).json();
-      if (cr.ok) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: full.flow.definition }) });
+      await fetch(`${API}/api/flows/${f.id}/assign-inbox`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inbox_id: val === "" ? null : val }) });
+      setPendingInbox((p) => { const n = { ...p }; delete n[f.id]; return n; });
       await load();
-    } catch { setMsg("Duplicate failed"); }
-  };
-  const exportBot = async (f) => {
-    setMenuOpen(null);
-    try {
-      const full = await (await fetch(`${API}/api/flows/${f.id}`)).json();
-      const blob = new Blob([JSON.stringify({ name: full.flow.name, definition: full.flow.definition }, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${(f.name || "chatbot").replace(/\s+/g, "-")}.json`; a.click(); URL.revokeObjectURL(url);
-    } catch { setMsg("Export failed"); }
-  };
-  const doDelete = async () => {
-    const f = confirmDel; setConfirmDel(null); if (!f) return;
-    try { await fetch(`${API}/api/flows/${f.id}`, { method: "DELETE" }); await load(); } catch { setMsg("Delete failed"); }
-  };
-  const importBot = async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    try {
-      const data = JSON.parse(await file.text());
-      const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: data.name || "Imported chatbot" }) })).json();
-      if (cr.ok && data.definition) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: data.definition }) });
-      await load();
-    } catch { setMsg("Import failed — galat JSON"); }
-    e.target.value = "";
-  };
-  const assign = async (f, val) => {
-    try { await fetch(`${API}/api/flows/${f.id}/assign-inbox`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inbox_id: val === "" ? null : val }) }); await load(); } catch { setMsg("Assign failed"); }
+    } catch { setMsg("Save failed"); }
   };
 
   const btnPrimary = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: T.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: T.font };
@@ -184,46 +156,56 @@ function Dashboard({ onEdit }) {
           <button style={btnPrimary} onClick={createBot}>＋ Create Chatbot</button>
         </div>
       </div>
-
       {msg && <div style={{ margin: "0 28px 8px", color: "#dc2626", fontSize: 13 }}>{msg}</div>}
 
       <div style={{ padding: "8px 28px 28px" }}>
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.4fr 1.2fr", padding: "12px 16px", background: T.soft, fontSize: 12, fontWeight: 600, color: T.sub, textTransform: "uppercase", letterSpacing: ".03em" }}>
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.6fr 1.1fr", padding: "12px 16px", background: T.soft, fontSize: 12, fontWeight: 600, color: T.sub, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: "12px 12px 0 0" }}>
             <div>Name</div><div>Status</div><div>Number / Inbox</div><div style={{ textAlign: "right" }}>Actions</div>
           </div>
-
           {flows === null && <div style={{ padding: 20, color: T.sub, fontSize: 13 }}>Loading…</div>}
           {flows && flows.length === 0 && <div style={{ padding: 24, color: T.sub, fontSize: 13 }}>Abhi koi chatbot nahi. “Create Chatbot” se shuru karein.</div>}
 
-          {flows && flows.map((f) => (
-            <div key={f.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.4fr 1.2fr", alignItems: "center", padding: "14px 16px", borderTop: `1px solid ${T.border}` }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{f.name}</div>
-              <div><span style={pill(f.status)}>{f.status}</span></div>
-              <div>
-                <select value={f.inbox_id ?? ""} onChange={(e) => assign(f, e.target.value)} style={{ padding: "6px 8px", border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: "#fff", maxWidth: 180 }}>
-                  <option value="">— None (default)</option>
-                  {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
-                </select>
+          {flows && flows.map((f) => {
+            const cur = f.inbox_id ?? "";
+            const sel = pendingInbox[f.id] !== undefined ? pendingInbox[f.id] : cur;
+            const dirty = pendingInbox[f.id] !== undefined && String(pendingInbox[f.id]) !== String(cur);
+            return (
+              <div key={f.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.6fr 1.1fr", alignItems: "center", padding: "14px 16px", borderTop: `1px solid ${T.border}` }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{f.name}</div>
+                <div><span style={pill(f.status)}>{f.status}</span></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ padding: "6px 8px", border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: "#fff", maxWidth: 170 }}>
+                    <option value="">— None (off)</option>
+                    {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
+                  </select>
+                  {dirty && <button onClick={() => saveInbox(f)} style={{ padding: "6px 12px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Save</button>}
+                </div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                  <button style={{ ...btnGhost, padding: "6px 14px" }} onClick={() => onEdit(f.id)}>Edit</button>
+                  <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenuOpen(menuOpen && menuOpen.id === f.id ? null : { id: f.id, x: r.right, y: r.bottom }); }} style={{ width: 32, height: 32, border: `1px solid ${T.border}`, borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 18, lineHeight: "16px", color: T.sub }}>⋮</button>
+                </div>
               </div>
-              <div style={{ position: "relative", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                <button style={{ ...btnGhost, padding: "6px 14px" }} onClick={() => onEdit(f.id)}>Edit</button>
-                <button onClick={() => setMenuOpen(menuOpen === f.id ? null : f.id)} style={{ width: 32, height: 32, border: `1px solid ${T.border}`, borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 18, lineHeight: "16px", color: T.sub }}>⋮</button>
-                {menuOpen === f.id && (
-                  <div style={{ position: "absolute", top: 40, right: 0, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,.15)", zIndex: 100, minWidth: 160, overflow: "hidden" }}>
-                    {[["Edit", () => { setMenuOpen(null); onEdit(f.id); }], ["Duplicate", () => duplicate(f)], ["Export", () => exportBot(f)], ["Delete", () => { setMenuOpen(null); setConfirmDel(f); }]].map(([lbl, fn]) => (
-                      <div key={lbl} onClick={fn} style={{ padding: "10px 14px", fontSize: 13, cursor: "pointer", color: lbl === "Delete" ? "#dc2626" : T.text, borderTop: lbl === "Delete" ? `1px solid ${T.border}` : "none" }} onMouseEnter={(e) => (e.currentTarget.style.background = T.soft)} onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}>{lbl}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
+      {/* 3-dot menu (fixed — overflow se cut nahi hoga) */}
+      {menuOpen && (() => {
+        const f = (flows || []).find((x) => x.id === menuOpen.id);
+        if (!f) return null;
+        const items = [["Edit", () => { setMenuOpen(null); onEdit(f.id); }], ["Duplicate", () => duplicate(f)], ["Export", () => exportBot(f)], ["Delete", () => { setMenuOpen(null); setConfirmDel(f); }]];
+        return (<>
+          <div onClick={() => setMenuOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
+          <div style={{ position: "fixed", top: menuOpen.y + 6, left: menuOpen.x - 160, width: 160, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: "0 10px 28px rgba(0,0,0,.16)", zIndex: 100, overflow: "hidden" }}>
+            {items.map(([lbl, fn]) => (<div key={lbl} onClick={fn} style={{ padding: "10px 14px", fontSize: 13, cursor: "pointer", color: lbl === "Delete" ? "#dc2626" : T.text, borderTop: lbl === "Delete" ? `1px solid ${T.border}` : "none" }} onMouseEnter={(e) => (e.currentTarget.style.background = T.soft)} onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}>{lbl}</div>))}
+          </div>
+        </>);
+      })()}
+
       {confirmDel && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setConfirmDel(null)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={() => setConfirmDel(null)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 360, fontFamily: T.font }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Delete chatbot?</div>
             <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>“{confirmDel.name}” permanently delete ho jayega.</div>
@@ -238,7 +220,6 @@ function Dashboard({ onEdit }) {
   );
 }
 
-// ========================= EDITOR (canvas) =========================
 function Editor({ flowId, onBack }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([startNode()]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -275,9 +256,7 @@ function Editor({ flowId, onBack }) {
       else setStatus("✅ Saved (draft)");
     } catch { setStatus("Save failed"); }
   }
-  async function unpublish() {
-    try { const j = await (await fetch(`${API}/api/flows/${flowId}/unpublish`, { method: "POST" })).json(); if (j.ok) { setFlowStatus("draft"); setStatus("Unpublished"); } } catch { setStatus("Failed"); }
-  }
+  async function unpublish() { try { const j = await (await fetch(`${API}/api/flows/${flowId}/unpublish`, { method: "POST" })).json(); if (j.ok) { setFlowStatus("draft"); setStatus("Unpublished"); } } catch { setStatus("Failed"); } }
 
   const tBtn = { padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font };
   return (
