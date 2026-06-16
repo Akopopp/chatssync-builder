@@ -10,48 +10,76 @@ const params = new URLSearchParams(window.location.search);
 const API = (import.meta.env.VITE_API_URL || "http://kkzof1hiq0af5vngi0v689zi.5.75.237.171.sslip.io").replace(/\/$/, "");
 const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACCOUNT_ID || "3", 10);
 
-const T = {
-  blue: "#1f93ff", text: "#1f2d3d", sub: "#64748b", border: "#e5e7eb",
-  bg: "#ffffff", soft: "#f8fafc",
-  green: "#15803d", greenBg: "#e7f7ee", grayPill: "#64748b", grayPillBg: "#f1f5f9",
-  font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-};
-const C = { start: "#0EA5E9", text: "#2781F6", buttons: "#16A34A", question: "#9333EA", stop: "#DC2626" };
+// Light theme (DASHBOARD)
+const T = { blue: "#1f93ff", text: "#1f2d3d", sub: "#64748b", border: "#e5e7eb", bg: "#ffffff", soft: "#f8fafc", green: "#15803d", greenBg: "#e7f7ee", grayPill: "#64748b", grayPillBg: "#f1f5f9", font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
+// Dark theme (CANVAS / EDITOR)
+const D = { bg: "#0a0d14", panel: "#0d1119", panel2: "#121826", card: "#141b27", border: "rgba(255,255,255,.08)", text: "#e8edf5", sub: "#9aa7bd", faint: "#5b6678", input: "#0f1622" };
+const NC = { start: "#22d3ee", text: "#3b82f6", buttons: "#22c55e", question: "#a855f7", stop: "#f43f5e" };
+
+function hexA(hex, a) { const h = hex.replace("#", ""); const f = h.length === 3 ? h.split("").map((c) => c + c).join("") : h; const n = parseInt(f, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
 
 function injectFont() {
-  if (document.getElementById("cs-inter")) return;
-  const l = document.createElement("link"); l.id = "cs-inter"; l.rel = "stylesheet";
-  l.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
-  document.head.appendChild(l);
+  if (!document.getElementById("cs-inter")) {
+    const l = document.createElement("link"); l.id = "cs-inter"; l.rel = "stylesheet";
+    l.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
+    document.head.appendChild(l);
+  }
   document.body.style.margin = "0"; document.body.style.fontFamily = T.font;
 }
+function injectStyles() {
+  if (document.getElementById("cs-dark")) return;
+  const s = document.createElement("style"); s.id = "cs-dark";
+  s.textContent = `
+  .react-flow__controls{box-shadow:0 8px 24px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;}
+  .react-flow__controls-button{background:#141b27;border-bottom:1px solid rgba(255,255,255,.08);}
+  .react-flow__controls-button:hover{background:#1c2533;}
+  .react-flow__controls-button svg{fill:#cbd5e1;}
+  .react-flow__minimap{background:#0a0d14 !important;border:1px solid rgba(255,255,255,.06);border-radius:8px;}
+  .react-flow__attribution{background:transparent;color:#475569;}
+  .react-flow__edge-path{filter:drop-shadow(0 0 2.5px rgba(99,102,241,.55));}
+  .cs-pal:hover{border-color:rgba(255,255,255,.22)!important;transform:translateY(-1px);box-shadow:0 8px 22px rgba(0,0,0,.5)!important;}
+  .cs-in{background:#0f1622;border:1px solid rgba(255,255,255,.1);color:#e8edf5;}
+  .cs-in:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25);}
+  .cs-in::placeholder{color:#5b6678;}
+  .cs-pub:hover{box-shadow:0 0 22px rgba(34,197,94,.6)!important;}
+  `;
+  document.head.appendChild(s);
+}
 
-const box = (sel) => ({ background: "#fff", borderRadius: 10, width: 230, border: sel ? `2px solid ${T.blue}` : "1px solid #e2e8f0", boxShadow: "0 2px 6px rgba(0,0,0,.08)", fontFamily: T.font, fontSize: 12, overflow: "hidden" });
-const head = (bg) => ({ background: bg, color: "#fff", padding: "8px 10px", fontWeight: 600, fontSize: 12 });
-const nbody = { padding: 10, color: "#334155", whiteSpace: "pre-wrap", minHeight: 18, lineHeight: 1.4 };
-const btnRow = { position: "relative", margin: "6px 10px", padding: "6px 24px 6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, background: "#f1f5f9", color: "#1e293b" };
+// ===== NODE bits (dark glow) =====
+const nodeBox = (accent, sel) => ({ position: "relative", background: D.card, borderRadius: 14, width: 242, border: `1px solid ${sel ? accent : D.border}`, boxShadow: sel ? `0 0 0 1px ${accent}, 0 0 26px ${hexA(accent, .38)}, 0 14px 34px rgba(0,0,0,.6)` : `0 0 18px ${hexA(accent, .12)}, 0 12px 28px rgba(0,0,0,.55)`, fontFamily: T.font, overflow: "hidden", transition: "box-shadow .15s, border-color .15s" });
+const nbody = { padding: "2px 12px 12px", color: D.sub, whiteSpace: "pre-wrap", minHeight: 14, lineHeight: 1.45, fontSize: 12 };
+const hStyle = (accent) => ({ width: 11, height: 11, background: "#0a0d14", border: `2px solid ${accent}`, boxShadow: `0 0 8px ${hexA(accent, .8)}` });
 const EdgeCtx = createContext(null);
 
-function StartNode({ data }) { return (<div style={box(false)}><div style={head(C.start)}>⚡ On Message (Start)</div><div style={nbody}>{data.keywords ? `Keywords: ${data.keywords}` : "Pehle message par flow shuru"}</div><Handle type="source" position={Position.Bottom} /></div>); }
-function TextNode({ data, selected }) { return (<div style={box(selected)}><Handle type="target" position={Position.Top} /><div style={head(C.text)}>💬 Send Text</div><div style={nbody}>{data.text || "…"}</div><Handle type="source" position={Position.Bottom} /></div>); }
+function Hdr({ a, icon, title }) {
+  return (<div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 12px 6px" }}>
+    <div style={{ width: 24, height: 24, borderRadius: 7, display: "grid", placeItems: "center", background: hexA(a, .16), color: a, boxShadow: `0 0 12px ${hexA(a, .45)}`, fontSize: 13 }}>{icon}</div>
+    <div style={{ color: D.text, fontWeight: 600, fontSize: 12.5 }}>{title}</div>
+  </div>);
+}
+function Strip({ a }) { return <div style={{ height: 3, background: a, boxShadow: `0 0 12px ${a}` }} />; }
+
+function StartNode({ data }) { const a = NC.start; return (<div style={nodeBox(a, false)}><Strip a={a} /><Hdr a={a} icon="⚡" title="On Message" /><div style={nbody}>{data.keywords ? `Keywords: ${data.keywords}` : "Pehle message par flow shuru"}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
+function TextNode({ data, selected }) { const a = NC.text; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="💬" title="Send Text" /><div style={nbody}>{data.text || "…"}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
 function ButtonsNode({ data, selected }) {
-  const buttons = data.buttons || [];
-  return (<div style={box(selected)}><Handle type="target" position={Position.Top} /><div style={head(C.buttons)}>🔘 Send Buttons</div><div style={nbody}>{data.text || "…"}</div>
-    {buttons.map((b, i) => (<div key={i} style={btnRow}>{b.title || `Button ${i + 1}`}<Handle type="source" position={Position.Right} id={`btn-${i}`} style={{ top: "50%", right: -7, transform: "translateY(-50%)", background: C.buttons, width: 10, height: 10 }} /></div>))}
+  const a = NC.buttons; const buttons = data.buttons || [];
+  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="🔘" title="Send Buttons" /><div style={nbody}>{data.text || "…"}</div>
+    {buttons.map((b, i) => (<div key={i} style={{ position: "relative", margin: "6px 12px", padding: "7px 26px 7px 10px", border: `1px solid ${D.border}`, borderRadius: 8, background: "#0f1622", color: D.text, fontSize: 12 }}>{b.title || `Button ${i + 1}`}<Handle type="source" position={Position.Right} id={`btn-${i}`} style={{ top: "50%", right: -7, transform: "translateY(-50%)", ...hStyle(a) }} /></div>))}
     <div style={{ height: 6 }} /></div>);
 }
-function QuestionNode({ data, selected }) { return (<div style={box(selected)}><Handle type="target" position={Position.Top} /><div style={head(C.question)}>❓ Ask Question</div><div style={nbody}>{data.text || "…"}{data.saveAs ? <div style={{ marginTop: 6, fontSize: 11, color: "#7c3aed" }}>→ save as: {data.saveAs}</div> : null}</div><Handle type="source" position={Position.Bottom} /></div>); }
-function StopNode({ data, selected }) { return (<div style={box(selected)}><Handle type="target" position={Position.Top} /><div style={head(C.stop)}>🛑 Stop / Talk to Human</div><div style={nbody}>{data.text || "(koi message nahi)"}</div></div>); }
+function QuestionNode({ data, selected }) { const a = NC.question; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="❓" title="Ask Question" /><div style={nbody}>{data.text || "…"}{data.saveAs ? <div style={{ marginTop: 6, fontSize: 11, color: a }}>→ save as: {data.saveAs}</div> : null}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
+function StopNode({ data, selected }) { const a = NC.stop; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="🛑" title="Stop / Human" /><div style={nbody}>{data.text || "(koi message nahi)"}</div></div>); }
 const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, question: QuestionNode, stop: StopNode };
 
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }) {
   const { onDeleteEdge } = useContext(EdgeCtx) || {};
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   return (<>
-    <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{ ...style, stroke: "#94a3b8", strokeWidth: 2 }} />
+    <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{ ...style, stroke: "#6366f1", strokeWidth: 2, opacity: .9 }} />
     <EdgeLabelRenderer>
       <button onClick={(e) => { e.stopPropagation(); onDeleteEdge && onDeleteEdge(id); }} title="Connection hatao"
-        style={{ position: "absolute", transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all", width: 20, height: 20, borderRadius: "50%", border: "2px solid #fff", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 11, lineHeight: "16px", boxShadow: "0 1px 4px rgba(0,0,0,.35)", padding: 0 }}>✕</button>
+        style={{ position: "absolute", transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all", width: 20, height: 20, borderRadius: "50%", border: "2px solid #0a0d14", background: "#f43f5e", color: "#fff", cursor: "pointer", fontSize: 11, lineHeight: "16px", boxShadow: `0 0 10px ${hexA("#f43f5e", .7)}`, padding: 0 }}>✕</button>
     </EdgeLabelRenderer>
   </>);
 }
@@ -65,10 +93,10 @@ function defaultData(kind) {
   return {};
 }
 const PALETTE = [
-  { kind: "text", label: "💬 Send Text", color: C.text },
-  { kind: "buttons", label: "🔘 Send Buttons", color: C.buttons },
-  { kind: "question", label: "❓ Ask Question", color: C.question },
-  { kind: "stop", label: "🛑 Stop / Human", color: C.stop },
+  { kind: "text", label: "Send Text", icon: "💬", color: NC.text },
+  { kind: "buttons", label: "Send Buttons", icon: "🔘", color: NC.buttons },
+  { kind: "question", label: "Ask Question", icon: "❓", color: NC.question },
+  { kind: "stop", label: "Stop / Human", icon: "🛑", color: NC.stop },
 ];
 const startNode = () => ({ id: "start", type: "start", position: { x: 320, y: 40 }, data: { keywords: "" }, deletable: false });
 
@@ -105,17 +133,18 @@ function fromEngineFormat(def) {
 export default function App() {
   const [view, setView] = useState("dashboard");
   const [editId, setEditId] = useState(null);
-  useEffect(() => { injectFont(); }, []);
+  useEffect(() => { injectFont(); injectStyles(); }, []);
   if (view === "editor") return <Editor flowId={editId} onBack={() => setView("dashboard")} />;
   return <Dashboard onEdit={(id) => { setEditId(id); setView("editor"); }} />;
 }
 
+// ===================== DASHBOARD (light — unchanged) =====================
 function Dashboard({ onEdit }) {
   const [flows, setFlows] = useState(null);
   const [inboxes, setInboxes] = useState([]);
-  const [menuOpen, setMenuOpen] = useState(null); // {id,x,y}
+  const [menuOpen, setMenuOpen] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
-  const [pendingInbox, setPendingInbox] = useState({}); // id -> chosen value (unsaved)
+  const [pendingInbox, setPendingInbox] = useState({});
   const [msg, setMsg] = useState("");
   const fileRef = useRef(null);
 
@@ -130,14 +159,7 @@ function Dashboard({ onEdit }) {
   const exportBot = async (f) => { setMenuOpen(null); try { const full = await (await fetch(`${API}/api/flows/${f.id}`)).json(); const blob = new Blob([JSON.stringify({ name: full.flow.name, definition: full.flow.definition }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${(f.name || "chatbot").replace(/\s+/g, "-")}.json`; a.click(); URL.revokeObjectURL(url); } catch { setMsg("Export failed"); } };
   const doDelete = async () => { const f = confirmDel; setConfirmDel(null); if (!f) return; try { await fetch(`${API}/api/flows/${f.id}`, { method: "DELETE" }); await load(); } catch { setMsg("Delete failed"); } };
   const importBot = async (e) => { const file = e.target.files?.[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: data.name || "Imported chatbot" }) })).json(); if (cr.ok && data.definition) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: data.definition }) }); await load(); } catch { setMsg("Import failed — galat JSON"); } e.target.value = ""; };
-  const saveInbox = async (f) => {
-    const val = pendingInbox[f.id];
-    try {
-      await fetch(`${API}/api/flows/${f.id}/assign-inbox`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inbox_id: val === "" ? null : val }) });
-      setPendingInbox((p) => { const n = { ...p }; delete n[f.id]; return n; });
-      await load();
-    } catch { setMsg("Save failed"); }
-  };
+  const saveInbox = async (f) => { const val = pendingInbox[f.id]; try { await fetch(`${API}/api/flows/${f.id}/assign-inbox`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inbox_id: val === "" ? null : val }) }); setPendingInbox((p) => { const n = { ...p }; delete n[f.id]; return n; }); await load(); } catch { setMsg("Save failed"); } };
 
   const btnPrimary = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: T.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: T.font };
   const btnGhost = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "#fff", color: T.text, border: `1px solid ${T.border}`, borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 500, fontFamily: T.font };
@@ -146,10 +168,7 @@ function Dashboard({ onEdit }) {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.font, color: T.text }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "24px 28px 12px" }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>Chatbots</div>
-          <div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Manage your chatbots</div>
-        </div>
+        <div><div style={{ fontSize: 22, fontWeight: 700 }}>Chatbots</div><div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Manage your chatbots</div></div>
         <div style={{ display: "flex", gap: 10 }}>
           <input ref={fileRef} type="file" accept="application/json" onChange={importBot} style={{ display: "none" }} />
           <button style={btnGhost} onClick={() => fileRef.current?.click()}>⬆ Import</button>
@@ -157,7 +176,6 @@ function Dashboard({ onEdit }) {
         </div>
       </div>
       {msg && <div style={{ margin: "0 28px 8px", color: "#dc2626", fontSize: 13 }}>{msg}</div>}
-
       <div style={{ padding: "8px 28px 28px" }}>
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 12 }}>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.6fr 1.1fr", padding: "12px 16px", background: T.soft, fontSize: 12, fontWeight: 600, color: T.sub, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: "12px 12px 0 0" }}>
@@ -165,10 +183,8 @@ function Dashboard({ onEdit }) {
           </div>
           {flows === null && <div style={{ padding: 20, color: T.sub, fontSize: 13 }}>Loading…</div>}
           {flows && flows.length === 0 && <div style={{ padding: 24, color: T.sub, fontSize: 13 }}>Abhi koi chatbot nahi. “Create Chatbot” se shuru karein.</div>}
-
           {flows && flows.map((f) => {
-            const cur = f.inbox_id ?? "";
-            const sel = pendingInbox[f.id] !== undefined ? pendingInbox[f.id] : cur;
+            const cur = f.inbox_id ?? ""; const sel = pendingInbox[f.id] !== undefined ? pendingInbox[f.id] : cur;
             const dirty = pendingInbox[f.id] !== undefined && String(pendingInbox[f.id]) !== String(cur);
             return (
               <div key={f.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.6fr 1.1fr", alignItems: "center", padding: "14px 16px", borderTop: `1px solid ${T.border}` }}>
@@ -191,10 +207,8 @@ function Dashboard({ onEdit }) {
         </div>
       </div>
 
-      {/* 3-dot menu (fixed — overflow se cut nahi hoga) */}
       {menuOpen && (() => {
-        const f = (flows || []).find((x) => x.id === menuOpen.id);
-        if (!f) return null;
+        const f = (flows || []).find((x) => x.id === menuOpen.id); if (!f) return null;
         const items = [["Edit", () => { setMenuOpen(null); onEdit(f.id); }], ["Duplicate", () => duplicate(f)], ["Export", () => exportBot(f)], ["Delete", () => { setMenuOpen(null); setConfirmDel(f); }]];
         return (<>
           <div onClick={() => setMenuOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
@@ -220,6 +234,7 @@ function Dashboard({ onEdit }) {
   );
 }
 
+// ===================== EDITOR (DARK premium canvas) =====================
 function Editor({ flowId, onBack }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([startNode()]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -231,18 +246,13 @@ function Editor({ flowId, onBack }) {
 
   useEffect(() => {
     (async () => {
-      try {
-        const j = await (await fetch(`${API}/api/flows/${flowId}`)).json();
-        setName(j.flow.name || ""); setFlowStatus(j.flow.status);
-        const { nodes: n, edges: e } = fromEngineFormat(j.flow.definition || { start: null, nodes: {} });
-        setNodes(n); setEdges(e); idRef.current = n.length + 5; setStatus("Loaded");
-      } catch { setStatus("Load failed"); }
+      try { const j = await (await fetch(`${API}/api/flows/${flowId}`)).json(); setName(j.flow.name || ""); setFlowStatus(j.flow.status); const { nodes: n, edges: e } = fromEngineFormat(j.flow.definition || { start: null, nodes: {} }); setNodes(n); setEdges(e); idRef.current = n.length + 5; setStatus("Loaded"); } catch { setStatus("Load failed"); }
     })();
   }, [flowId]);
 
   const onConnect = useCallback((p) => setEdges((eds) => addEdge({ ...p, type: "deletable", animated: true }, eds)), [setEdges]);
   const onDeleteEdge = useCallback((id) => setEdges((es) => es.filter((e) => e.id !== id)), [setEdges]);
-  const addNode = (kind) => { const id = `n${++idRef.current}`; setNodes((nds) => [...nds, { id, type: kind, position: { x: 320 + Math.random() * 60, y: 200 + nds.length * 40 }, data: defaultData(kind) }]); };
+  const addNode = (kind) => { const id = `n${++idRef.current}`; setNodes((nds) => [...nds, { id, type: kind, position: { x: 340 + Math.random() * 60, y: 200 + nds.length * 40 }, data: defaultData(kind) }]); };
   const updateData = (id, patch) => setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
   const selected = nodes.find((n) => n.id === selectedId) || null;
 
@@ -258,53 +268,60 @@ function Editor({ flowId, onBack }) {
   }
   async function unpublish() { try { const j = await (await fetch(`${API}/api/flows/${flowId}/unpublish`, { method: "POST" })).json(); if (j.ok) { setFlowStatus("draft"); setStatus("Unpublished"); } } catch { setStatus("Failed"); } }
 
-  const tBtn = { padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font };
+  const dGhost = { padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: `1px solid ${D.border}`, background: D.panel2, color: D.text };
   return (
-    <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", fontFamily: T.font }}>
-      <div style={{ height: 56, background: "#fff", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", padding: "0 16px", gap: 12 }}>
-        <button onClick={onBack} style={{ ...tBtn, border: `1px solid ${T.border}`, background: "#fff", color: T.text }}>← Back</button>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Chatbot ka naam" style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: "7px 10px", fontSize: 14, fontWeight: 600, fontFamily: T.font, color: T.text, minWidth: 200 }} />
-        <span style={{ fontSize: 12, color: T.sub }}>{status}</span>
+    <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", fontFamily: T.font, background: D.bg }}>
+      <div style={{ height: 56, background: D.panel, borderBottom: `1px solid ${D.border}`, display: "flex", alignItems: "center", padding: "0 16px", gap: 12 }}>
+        <button onClick={onBack} style={dGhost}>← Back</button>
+        <input className="cs-in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Chatbot ka naam" style={{ borderRadius: 8, padding: "7px 10px", fontSize: 14, fontWeight: 600, fontFamily: T.font, minWidth: 200 }} />
+        <span style={{ fontSize: 12, color: D.sub }}>{status}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          {flowStatus === "published" && <button onClick={unpublish} style={{ ...tBtn, border: `1px solid ${T.border}`, background: "#fff", color: T.sub }}>Unpublish</button>}
-          <button onClick={() => save(false)} style={{ ...tBtn, border: `1px solid ${T.border}`, background: "#fff", color: T.text }}>Save Draft</button>
-          <button onClick={() => save(true)} style={{ ...tBtn, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700 }}>Publish</button>
+          {flowStatus === "published" && <button onClick={unpublish} style={{ ...dGhost, color: D.sub }}>Unpublish</button>}
+          <button onClick={() => save(false)} style={dGhost}>Save Draft</button>
+          <button className="cs-pub" onClick={() => save(true)} style={{ padding: "7px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700, boxShadow: "0 0 16px rgba(34,197,94,.45)" }}>Publish</button>
         </div>
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <div style={{ width: 210, background: T.soft, borderRight: `1px solid ${T.border}`, padding: 12, overflowY: "auto" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, marginBottom: 8, textTransform: "uppercase" }}>Actions</div>
-          {PALETTE.map((p) => (<button key={p.kind} onClick={() => addNode(p.kind)} style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 8, padding: "10px 12px", border: `1px solid ${T.border}`, borderLeft: `4px solid ${p.color}`, borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 13, color: T.text, fontFamily: T.font }}>{p.label}</button>))}
-          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>Connection hatane ke liye line ke beech <b style={{ color: "#dc2626" }}>✕</b> click karein.</div>
+        <div style={{ width: 214, background: D.panel, borderRight: `1px solid ${D.border}`, padding: 12, overflowY: "auto" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: D.faint, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".06em" }}>Actions</div>
+          {PALETTE.map((p) => (
+            <button key={p.kind} className="cs-pal" onClick={() => addNode(p.kind)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", marginBottom: 8, padding: "11px 12px", border: `1px solid ${D.border}`, borderLeft: `3px solid ${p.color}`, borderRadius: 10, background: D.panel2, color: D.text, cursor: "pointer", fontSize: 13, fontFamily: T.font, transition: "all .15s" }}>
+              <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: hexA(p.color, .16), color: p.color, boxShadow: `0 0 10px ${hexA(p.color, .4)}`, fontSize: 12 }}>{p.icon}</span>
+              {p.label}
+            </button>
+          ))}
+          <div style={{ fontSize: 11, color: D.faint, marginTop: 14, lineHeight: 1.6 }}>Node add karein, dots se connect karein. Line ke beech <b style={{ color: "#fb7185" }}>✕</b> se connection hatega.</div>
         </div>
 
-        <div style={{ flex: 1, background: T.soft }}>
+        <div style={{ flex: 1, background: D.bg, backgroundImage: "radial-gradient(circle at 30% 20%, rgba(99,102,241,.06), transparent 40%), radial-gradient(circle at 80% 80%, rgba(34,211,238,.05), transparent 40%)" }}>
           <EdgeCtx.Provider value={{ onDeleteEdge }}>
             <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => setSelectedId(n.id)} onPaneClick={() => setSelectedId(null)} fitView>
-              <Background color="#cbd5e1" gap={16} /><Controls /><MiniMap pannable zoomable />
+              <Background color="#1b2433" gap={18} size={1.3} />
+              <Controls />
+              <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || "#3b82f6"} maskColor="rgba(4,7,12,.65)" />
             </ReactFlow>
           </EdgeCtx.Provider>
         </div>
 
-        <div style={{ width: 290, background: "#fff", borderLeft: `1px solid ${T.border}`, padding: 16, overflowY: "auto" }}>
-          {!selected && <div style={{ color: "#94a3b8", fontSize: 13 }}>Koi node select karein editing ke liye.</div>}
-          {selected && selected.type === "start" && (<Ed title="On Message (Start)"><Lb>Keywords (optional)</Lb><In value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} placeholder="hi, hello, menu" /><Hn>Start ko kisi node se connect karein.</Hn></Ed>)}
+        <div style={{ width: 294, background: D.panel, borderLeft: `1px solid ${D.border}`, padding: 16, overflowY: "auto" }}>
+          {!selected && <div style={{ color: D.faint, fontSize: 13 }}>Koi node select karein editing ke liye.</div>}
+          {selected && selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><In value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} placeholder="hi, hello, menu" /><Hn>Start ko kisi node se connect karein.</Hn></Ed>)}
           {selected && selected.type === "text" && (<Ed title="💬 Send Text"><Lb>Message</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /></Ed>)}
           {selected && selected.type === "buttons" && (<Ed title="🔘 Send Buttons"><Lb>Body text</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /><Lb>Buttons</Lb>
-            {(selected.data.buttons || []).map((b, i) => (<div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}><In value={b.title} onChange={(v) => { const arr = [...selected.data.buttons]; arr[i] = { ...arr[i], title: v }; updateData(selected.id, { buttons: arr }); }} placeholder={`Button ${i + 1}`} /><button onClick={() => { const arr = selected.data.buttons.filter((_, j) => j !== i); updateData(selected.id, { buttons: arr }); }} style={{ border: "1px solid #fca5a5", color: "#dc2626", background: "#fff", borderRadius: 6, cursor: "pointer", padding: "0 10px" }}>✕</button></div>))}
-            <button onClick={() => updateData(selected.id, { buttons: [...(selected.data.buttons || []), { title: "" }] })} style={{ marginTop: 4, padding: "8px 12px", border: "1px dashed #16A34A", color: "#16A34A", background: "#f0fdf4", borderRadius: 8, cursor: "pointer", width: "100%" }}>+ Add Button</button><Hn>Har button ke right dot ko agle node se connect karein.</Hn></Ed>)}
+            {(selected.data.buttons || []).map((b, i) => (<div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}><In value={b.title} onChange={(v) => { const arr = [...selected.data.buttons]; arr[i] = { ...arr[i], title: v }; updateData(selected.id, { buttons: arr }); }} placeholder={`Button ${i + 1}`} /><button onClick={() => { const arr = selected.data.buttons.filter((_, j) => j !== i); updateData(selected.id, { buttons: arr }); }} style={{ border: "1px solid rgba(244,63,94,.5)", color: "#fb7185", background: "transparent", borderRadius: 6, cursor: "pointer", padding: "0 10px" }}>✕</button></div>))}
+            <button onClick={() => updateData(selected.id, { buttons: [...(selected.data.buttons || []), { title: "" }] })} style={{ marginTop: 4, padding: "8px 12px", border: "1px dashed #22c55e", color: "#4ade80", background: "rgba(34,197,94,.08)", borderRadius: 8, cursor: "pointer", width: "100%" }}>+ Add Button</button><Hn>Har button ke right dot ko agle node se connect karein.</Hn></Ed>)}
           {selected && selected.type === "question" && (<Ed title="❓ Ask Question"><Lb>Sawaal</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /><Lb>Jawab kis naam se save ho</Lb><In value={selected.data.saveAs || ""} onChange={(v) => updateData(selected.id, { saveAs: v })} placeholder="naam, email…" /></Ed>)}
           {selected && selected.type === "stop" && (<Ed title="🛑 Stop / Talk to Human"><Lb>Message (optional)</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /></Ed>)}
-          {selected && selected.deletable !== false && (<button onClick={() => { setNodes((nds) => nds.filter((n) => n.id !== selected.id)); setEdges((e) => e.filter((ed) => ed.source !== selected.id && ed.target !== selected.id)); setSelectedId(null); }} style={{ marginTop: 16, width: "100%", padding: "8px 12px", border: "1px solid #fca5a5", color: "#dc2626", background: "#fef2f2", borderRadius: 8, cursor: "pointer" }}>Delete node</button>)}
+          {selected && selected.deletable !== false && (<button onClick={() => { setNodes((nds) => nds.filter((n) => n.id !== selected.id)); setEdges((e) => e.filter((ed) => ed.source !== selected.id && ed.target !== selected.id)); setSelectedId(null); }} style={{ marginTop: 16, width: "100%", padding: "9px 12px", border: "1px solid rgba(244,63,94,.5)", color: "#fb7185", background: "rgba(244,63,94,.08)", borderRadius: 8, cursor: "pointer" }}>Delete node</button>)}
         </div>
       </div>
     </div>
   );
 }
 
-function Ed({ title, children }) { return (<div><div style={{ fontWeight: 700, marginBottom: 12, color: T.text }}>{title}</div>{children}</div>); }
-function Lb({ children }) { return <div style={{ fontSize: 12, fontWeight: 600, color: "#475569", margin: "10px 0 4px" }}>{children}</div>; }
-function Hn({ children }) { return <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
-function In({ value, onChange, placeholder }) { return (<input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} />); }
-function Ar({ value, onChange }) { return (<textarea value={value} onChange={(e) => onChange(e.target.value)} rows={4} style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} />); }
+function Ed({ title, children }) { return (<div><div style={{ fontWeight: 700, marginBottom: 12, color: D.text }}>{title}</div>{children}</div>); }
+function Lb({ children }) { return <div style={{ fontSize: 12, fontWeight: 600, color: D.sub, margin: "10px 0 4px" }}>{children}</div>; }
+function Hn({ children }) { return <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
+function In({ value, onChange, placeholder }) { return (<input className="cs-in" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} />); }
+function Ar({ value, onChange }) { return (<textarea className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} rows={4} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} />); }
