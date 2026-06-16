@@ -42,6 +42,7 @@ function injectStyles() {
   .cs-in:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25);}
   .cs-in::placeholder{color:#5b6678;}
   .cs-pub:hover{box-shadow:0 0 22px rgba(34,197,94,.6)!important;}
+  .cs-gcard:hover{border-color:rgba(255,255,255,.2)!important;transform:translateY(-2px);box-shadow:0 14px 32px rgba(0,0,0,.6)!important;}
   `;
   document.head.appendChild(s);
 }
@@ -131,9 +132,12 @@ function fromEngineFormat(def) {
 }
 
 export default function App() {
-  const [view, setView] = useState("dashboard");
+  // ?view=gallery  -> Gallery screen (Chatwoot sidebar tab iframe yahi kholta hai)
+  const initialView = params.get("view") === "gallery" ? "gallery" : "dashboard";
+  const [view, setView] = useState(initialView);
   const [editId, setEditId] = useState(null);
   useEffect(() => { injectFont(); injectStyles(); }, []);
+  if (view === "gallery") return <Gallery />;
   if (view === "editor") return <Editor flowId={editId} onBack={() => setView("dashboard")} />;
   return <Dashboard onEdit={(id) => { setEditId(id); setView("editor"); }} />;
 }
@@ -228,6 +232,179 @@ function Dashboard({ onEdit }) {
               <button style={{ ...btnPrimary, background: "#dc2626" }} onClick={doDelete}>Delete</button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== GALLERY (DARK — media library) =====================
+// iframe-safe clipboard (cross-origin + http par navigator.clipboard kaam nahi karta)
+function copyText(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.top = "-9999px"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+function fmtSize(b) {
+  if (b == null) return "";
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return Math.round(b / 1024) + " KB";
+  return (b / 1048576).toFixed(1) + " MB";
+}
+const GTYPE = {
+  image: { icon: "🖼️", label: "Image", color: NC.start },
+  video: { icon: "🎬", label: "Video", color: NC.question },
+  audio: { icon: "🎵", label: "Audio", color: NC.buttons },
+  document: { icon: "📄", label: "Doc", color: "#f59e0b" },
+};
+
+function Gallery() {
+  const [media, setMedia] = useState(null);     // null=loading, []=empty
+  const [msg, setMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [preview, setPreview] = useState(null);  // image lightbox
+  const fileRef = useRef(null);
+
+  const load = async () => {
+    try { const j = await (await fetch(`${API}/api/media?account_id=${ACCOUNT_ID}`)).json(); setMedia(j.media || []); }
+    catch { setMedia([]); setMsg("Media load nahi hui — bot engine band to nahi?"); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const onFiles = async (e) => {
+    const files = Array.from(e.target.files || []); e.target.value = "";
+    if (!files.length) return;
+    setUploading(true); setMsg("");
+    let fail = 0;
+    for (const file of files) {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("account_id", String(ACCOUNT_ID));
+        const j = await (await fetch(`${API}/api/upload`, { method: "POST", body: fd })).json();
+        if (!j.ok) fail++;
+      } catch { fail++; }
+    }
+    setUploading(false);
+    if (fail) setMsg(`${fail} file upload nahi hui.`);
+    await load();
+  };
+
+  const doDelete = async () => {
+    const m = confirmDel; setConfirmDel(null); if (!m) return;
+    try { await fetch(`${API}/api/media/${m.id}`, { method: "DELETE" }); await load(); }
+    catch { setMsg("Delete fail ho gaya."); }
+  };
+
+  const doCopy = (m) => {
+    if (copyText(m.url)) { setCopiedId(m.id); setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1500); }
+    else setMsg("Copy nahi hua — link manually copy karein.");
+  };
+
+  const list = (media || []).filter((m) => filter === "all" || m.type === filter);
+  const counts = (media || []).reduce((acc, m) => { acc[m.type] = (acc[m.type] || 0) + 1; return acc; }, {});
+  const filters = [["all", "All"], ["image", "Images"], ["video", "Videos"], ["audio", "Audio"], ["document", "Docs"]];
+
+  const wrap = { minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text, backgroundImage: "radial-gradient(circle at 30% 0%, rgba(99,102,241,.06), transparent 40%), radial-gradient(circle at 90% 100%, rgba(34,211,238,.05), transparent 45%)" };
+  const primary = { display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 16px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, cursor: uploading ? "default" : "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, boxShadow: "0 0 16px rgba(34,197,94,.45)", opacity: uploading ? .75 : 1 };
+
+  return (
+    <div style={wrap}>
+      {/* Top bar */}
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: D.panel, borderBottom: `1px solid ${D.border}`, padding: "16px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: D.text }}>Media Gallery</div>
+          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>Images, videos, audio &amp; documents — chatbot mein bhejne ke liye</div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+          <input ref={fileRef} type="file" multiple accept="image/*,video/*,audio/*,application/pdf" onChange={onFiles} style={{ display: "none" }} />
+          <button className="cs-pub" style={primary} onClick={() => !uploading && fileRef.current?.click()}>{uploading ? "Uploading…" : "⬆ Upload media"}</button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 8, padding: "16px 24px 0", flexWrap: "wrap" }}>
+        {filters.map(([key, lbl]) => {
+          const active = filter === key;
+          const n = key === "all" ? (media || []).length : (counts[key] || 0);
+          return (
+            <button key={key} onClick={() => setFilter(key)} style={{ padding: "6px 13px", borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${active ? "#3b82f6" : D.border}`, background: active ? hexA("#3b82f6", .18) : D.panel2, color: active ? "#93c5fd" : D.sub }}>
+              {lbl}{media ? ` · ${n}` : ""}
+            </button>
+          );
+        })}
+      </div>
+
+      {msg && <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: hexA("#f43f5e", .12), border: `1px solid ${hexA("#f43f5e", .4)}`, color: "#fda4af", borderRadius: 8, fontSize: 13 }}>{msg}</div>}
+
+      {/* Grid */}
+      <div style={{ padding: 24 }}>
+        {media === null && <div style={{ color: D.sub, fontSize: 14, padding: 20 }}>Loading…</div>}
+        {media && list.length === 0 && (
+          <div style={{ border: `1px dashed ${D.border}`, borderRadius: 14, padding: "48px 24px", textAlign: "center", color: D.sub, background: D.panel2 }}>
+            <div style={{ fontSize: 34, marginBottom: 10 }}>🖼️</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: D.text, marginBottom: 4 }}>{filter === "all" ? "Abhi koi media nahi" : "Is type ki koi file nahi"}</div>
+            <div style={{ fontSize: 13 }}>Upar “Upload media” se files add karein.</div>
+          </div>
+        )}
+        {media && list.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 16 }}>
+            {list.map((m) => {
+              const meta = GTYPE[m.type] || GTYPE.document;
+              const name = m.original_name || m.filename || "file";
+              return (
+                <div key={m.id} className="cs-gcard" style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 10px 26px rgba(0,0,0,.5)", transition: "transform .15s, border-color .15s, box-shadow .15s" }}>
+                  <div style={{ position: "relative", height: 150, background: D.input, display: "grid", placeItems: "center", overflow: "hidden" }}>
+                    {m.type === "image" ? (
+                      <img src={m.url} alt={name} onClick={() => setPreview(m)} style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in" }} />
+                    ) : m.type === "video" ? (
+                      <video src={m.url} preload="metadata" muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <div style={{ fontSize: 44 }}>{meta.icon}</div>
+                    )}
+                    <span style={{ position: "absolute", top: 8, left: 8, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: hexA(meta.color, .22), color: meta.color, border: `1px solid ${hexA(meta.color, .5)}` }}>{meta.label}</span>
+                  </div>
+                  <div style={{ padding: "10px 12px 12px" }}>
+                    <div title={name} style={{ fontSize: 13, fontWeight: 600, color: D.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
+                    <div style={{ fontSize: 11, color: D.faint, marginTop: 2 }}>{fmtSize(m.size)}</div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <button onClick={() => doCopy(m)} style={{ flex: 1, padding: "7px 8px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, border: `1px solid ${D.border}`, background: copiedId === m.id ? hexA("#22c55e", .18) : D.panel2, color: copiedId === m.id ? "#4ade80" : D.text }}>{copiedId === m.id ? "✓ Copied" : "🔗 Copy link"}</button>
+                      <button onClick={() => setConfirmDel(m)} title="Delete" style={{ width: 36, padding: "7px 0", borderRadius: 7, cursor: "pointer", fontSize: 13, border: "1px solid rgba(244,63,94,.5)", background: "rgba(244,63,94,.08)", color: "#fb7185" }}>🗑</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Delete modal (iframe-safe, no confirm()) */}
+      {confirmDel && (
+        <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, padding: 22, width: 360, maxWidth: "100%", fontFamily: T.font, boxShadow: "0 24px 60px rgba(0,0,0,.7)" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: D.text, marginBottom: 8 }}>Delete media?</div>
+            <div style={{ fontSize: 13, color: D.sub, marginBottom: 18 }}>“{confirmDel.original_name || confirmDel.filename || "file"}” permanently delete ho jayegi.</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setConfirmDel(null)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: `1px solid ${D.border}`, background: D.panel2, color: D.text }}>Cancel</button>
+              <button onClick={doDelete} style={{ padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, border: "none", background: "#dc2626", color: "#fff" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image lightbox */}
+      {preview && (
+        <div onClick={() => setPreview(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 210, padding: 24, cursor: "zoom-out" }}>
+          <img src={preview.url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10, boxShadow: "0 20px 60px rgba(0,0,0,.8)" }} />
         </div>
       )}
     </div>
