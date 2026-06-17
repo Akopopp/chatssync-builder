@@ -7,7 +7,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 
 const params = new URLSearchParams(window.location.search);
-const API = (import.meta.env.VITE_API_URL || "http://kkzof1hiq0af5vngi0v689zi.5.75.237.171.sslip.io").replace(/\/$/, "");
+const API = (import.meta.env.VITE_API_URL || "https://kkzof1hiq0af5vngi0v689zi.5.75.237.171.sslip.io").replace(/\/$/, "");
 const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACCOUNT_ID || "3", 10);
 
 // Light theme (DASHBOARD)
