@@ -14,9 +14,41 @@ const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACC
 const T = { blue: "#1f93ff", text: "#1f2d3d", sub: "#64748b", border: "#e5e7eb", bg: "#ffffff", soft: "#f8fafc", green: "#15803d", greenBg: "#e7f7ee", grayPill: "#64748b", grayPillBg: "#f1f5f9", font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
 // Dark theme (CANVAS / EDITOR)
 const D = { bg: "#0a0d14", panel: "#0d1119", panel2: "#121826", card: "#141b27", border: "rgba(255,255,255,.08)", text: "#e8edf5", sub: "#9aa7bd", faint: "#5b6678", input: "#0f1622" };
-const NC = { start: "#22d3ee", text: "#3b82f6", buttons: "#22c55e", question: "#a855f7", stop: "#f43f5e" };
+const NC = { start: "#22d3ee", text: "#3b82f6", buttons: "#22c55e", question: "#a855f7", stop: "#f43f5e", media: "#f59e0b" };
 
 function hexA(hex, a) { const h = hex.replace("#", ""); const f = h.length === 3 ? h.split("").map((c) => c + c).join("") : h; const n = parseInt(f, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
+
+// shared media helpers
+const GTYPE = {
+  image: { icon: "🖼️", label: "Image", color: NC.start },
+  video: { icon: "🎬", label: "Video", color: NC.question },
+  audio: { icon: "🎵", label: "Audio", color: NC.buttons },
+  document: { icon: "📄", label: "Doc", color: "#f59e0b" },
+};
+function guessType(url) {
+  const ext = (String(url).split("?")[0].split(".").pop() || "").toLowerCase();
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(ext)) return "image";
+  if (["mp4", "webm", "mov", "mkv", "avi"].includes(ext)) return "video";
+  if (["mp3", "ogg", "wav", "m4a", "aac"].includes(ext)) return "audio";
+  return "document";
+}
+function fmtSize(b) {
+  if (b == null) return "";
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return Math.round(b / 1024) + " KB";
+  return (b / 1048576).toFixed(1) + " MB";
+}
+// iframe-safe clipboard (navigator.clipboard fails cross-origin and over http)
+function copyText(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.top = "-9999px"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
 
 function injectFont() {
   if (!document.getElementById("cs-inter")) {
@@ -61,7 +93,7 @@ function Hdr({ a, icon, title }) {
 }
 function Strip({ a }) { return <div style={{ height: 3, background: a, boxShadow: `0 0 12px ${a}` }} />; }
 
-function StartNode({ data }) { const a = NC.start; return (<div style={nodeBox(a, false)}><Strip a={a} /><Hdr a={a} icon="⚡" title="On Message" /><div style={nbody}>{data.keywords ? `Keywords: ${data.keywords}` : "Pehle message par flow shuru"}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
+function StartNode({ data }) { const a = NC.start; return (<div style={nodeBox(a, false)}><Strip a={a} /><Hdr a={a} icon="⚡" title="On Message" /><div style={nbody}>{data.keywords ? `Keywords: ${data.keywords}` : "Flow starts on the first message"}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
 function TextNode({ data, selected }) { const a = NC.text; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="💬" title="Send Text" /><div style={nbody}>{data.text || "…"}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
 function ButtonsNode({ data, selected }) {
   const a = NC.buttons; const buttons = data.buttons || [];
@@ -70,8 +102,20 @@ function ButtonsNode({ data, selected }) {
     <div style={{ height: 6 }} /></div>);
 }
 function QuestionNode({ data, selected }) { const a = NC.question; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="❓" title="Ask Question" /><div style={nbody}>{data.text || "…"}{data.saveAs ? <div style={{ marginTop: 6, fontSize: 11, color: a }}>→ save as: {data.saveAs}</div> : null}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
-function StopNode({ data, selected }) { const a = NC.stop; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="🛑" title="Stop / Human" /><div style={nbody}>{data.text || "(koi message nahi)"}</div></div>); }
-const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, question: QuestionNode, stop: StopNode };
+function StopNode({ data, selected }) { const a = NC.stop; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="🛑" title="Stop / Human" /><div style={nbody}>{data.text || "(no message)"}</div></div>); }
+function MediaNode({ data, selected }) {
+  const a = NC.media;
+  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><Strip a={a} /><Hdr a={a} icon="🖼️" title="Send Media" />
+    <div style={{ padding: "2px 12px 12px" }}>
+      {data.url ? (data.mediaType === "image"
+        ? <img src={data.url} alt="" style={{ width: "100%", height: 92, objectFit: "cover", borderRadius: 8, border: `1px solid ${D.border}` }} />
+        : <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: D.sub, padding: "6px 0" }}><span>{GTYPE[data.mediaType]?.icon || "📄"}</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name || "media"}</span></div>)
+        : <div style={{ fontSize: 12, color: D.faint }}>No media selected</div>}
+      {data.caption ? <div style={{ marginTop: 6, fontSize: 12, color: D.sub, whiteSpace: "pre-wrap" }}>{data.caption}</div> : null}
+    </div>
+    <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
+}
+const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, question: QuestionNode, stop: StopNode, media: MediaNode };
 
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }) {
   const { onDeleteEdge } = useContext(EdgeCtx) || {};
@@ -79,7 +123,7 @@ function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition,
   return (<>
     <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{ ...style, stroke: "#6366f1", strokeWidth: 2, opacity: .9 }} />
     <EdgeLabelRenderer>
-      <button onClick={(e) => { e.stopPropagation(); onDeleteEdge && onDeleteEdge(id); }} title="Connection hatao"
+      <button onClick={(e) => { e.stopPropagation(); onDeleteEdge && onDeleteEdge(id); }} title="Remove connection"
         style={{ position: "absolute", transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all", width: 20, height: 20, borderRadius: "50%", border: "2px solid #0a0d14", background: "#f43f5e", color: "#fff", cursor: "pointer", fontSize: 11, lineHeight: "16px", boxShadow: `0 0 10px ${hexA("#f43f5e", .7)}`, padding: 0 }}>✕</button>
     </EdgeLabelRenderer>
   </>);
@@ -87,15 +131,17 @@ function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition,
 const edgeTypes = { deletable: DeletableEdge };
 
 function defaultData(kind) {
-  if (kind === "text") return { text: "Apna message yahan likhein…" };
-  if (kind === "buttons") return { text: "Customer ko kya poochna hai?", buttons: [{ title: "Option 1" }, { title: "Option 2" }] };
-  if (kind === "question") return { text: "Aapka sawaal…", saveAs: "answer" };
-  if (kind === "stop") return { text: "Aapko ek agent se jod rahe hain 🙌" };
+  if (kind === "text") return { text: "Type your message here…" };
+  if (kind === "buttons") return { text: "What would you like to ask?", buttons: [{ title: "Option 1" }, { title: "Option 2" }] };
+  if (kind === "question") return { text: "Your question…", saveAs: "answer" };
+  if (kind === "stop") return { text: "Connecting you to an agent 🙌" };
+  if (kind === "media") return { url: "", mediaType: "", name: "", caption: "" };
   return {};
 }
 const PALETTE = [
   { kind: "text", label: "Send Text", icon: "💬", color: NC.text },
   { kind: "buttons", label: "Send Buttons", icon: "🔘", color: NC.buttons },
+  { kind: "media", label: "Send Media", icon: "🖼️", color: NC.media },
   { kind: "question", label: "Ask Question", icon: "❓", color: NC.question },
   { kind: "stop", label: "Stop / Human", icon: "🛑", color: NC.stop },
 ];
@@ -110,6 +156,7 @@ function toEngineFormat(nodes, edges) {
     if (n.type === "text") def.nodes[n.id] = { type: "text", text: n.data.text || "", next: plainNext[n.id] || null };
     else if (n.type === "question") def.nodes[n.id] = { type: "question", text: n.data.text || "", save_as: n.data.saveAs || "answer", next: plainNext[n.id] || null };
     else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: n.data.text || "" };
+    else if (n.type === "media") def.nodes[n.id] = { type: "media", url: n.data.url || "", media_type: n.data.mediaType || "", name: n.data.name || "", caption: n.data.caption || "", next: plainNext[n.id] || null };
     else if (n.type === "buttons") def.nodes[n.id] = { type: "buttons", text: n.data.text || "", buttons: (n.data.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null })) };
   }
   return def;
@@ -122,6 +169,7 @@ function fromEngineFormat(def) {
     if (kind === "text") data.text = node.text || "";
     if (kind === "question") { data.text = node.text || ""; data.saveAs = node.save_as || "answer"; }
     if (kind === "stop") data.text = node.text || "";
+    if (kind === "media") { data.url = node.url || ""; data.mediaType = node.media_type || ""; data.name = node.name || ""; data.caption = node.caption || ""; }
     if (kind === "buttons") { data.text = node.text || ""; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     nodes.push({ id, type: kind, position: { x: 320 + (idx % 2) * 300, y: y + idx * 120 }, data });
     if (kind === "buttons") (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); });
@@ -132,7 +180,7 @@ function fromEngineFormat(def) {
 }
 
 export default function App() {
-  // ?view=gallery  -> Gallery screen (Chatwoot sidebar tab iframe yahi kholta hai)
+  // ?view=gallery -> Gallery screen (this is what the Chatwoot sidebar tab iframe opens)
   const initialView = params.get("view") === "gallery" ? "gallery" : "dashboard";
   const [view, setView] = useState(initialView);
   const [editId, setEditId] = useState(null);
@@ -142,7 +190,7 @@ export default function App() {
   return <Dashboard onEdit={(id) => { setEditId(id); setView("editor"); }} />;
 }
 
-// ===================== DASHBOARD (light — unchanged) =====================
+// ===================== DASHBOARD (light) =====================
 function Dashboard({ onEdit }) {
   const [flows, setFlows] = useState(null);
   const [inboxes, setInboxes] = useState([]);
@@ -162,7 +210,7 @@ function Dashboard({ onEdit }) {
   const duplicate = async (f) => { setMenuOpen(null); try { const full = await (await fetch(`${API}/api/flows/${f.id}`)).json(); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: (f.name || "Chatbot") + " (copy)" }) })).json(); if (cr.ok) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: full.flow.definition }) }); await load(); } catch { setMsg("Duplicate failed"); } };
   const exportBot = async (f) => { setMenuOpen(null); try { const full = await (await fetch(`${API}/api/flows/${f.id}`)).json(); const blob = new Blob([JSON.stringify({ name: full.flow.name, definition: full.flow.definition }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${(f.name || "chatbot").replace(/\s+/g, "-")}.json`; a.click(); URL.revokeObjectURL(url); } catch { setMsg("Export failed"); } };
   const doDelete = async () => { const f = confirmDel; setConfirmDel(null); if (!f) return; try { await fetch(`${API}/api/flows/${f.id}`, { method: "DELETE" }); await load(); } catch { setMsg("Delete failed"); } };
-  const importBot = async (e) => { const file = e.target.files?.[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: data.name || "Imported chatbot" }) })).json(); if (cr.ok && data.definition) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: data.definition }) }); await load(); } catch { setMsg("Import failed — galat JSON"); } e.target.value = ""; };
+  const importBot = async (e) => { const file = e.target.files?.[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: data.name || "Imported chatbot" }) })).json(); if (cr.ok && data.definition) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: data.definition }) }); await load(); } catch { setMsg("Import failed — invalid JSON"); } e.target.value = ""; };
   const saveInbox = async (f) => { const val = pendingInbox[f.id]; try { await fetch(`${API}/api/flows/${f.id}/assign-inbox`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inbox_id: val === "" ? null : val }) }); setPendingInbox((p) => { const n = { ...p }; delete n[f.id]; return n; }); await load(); } catch { setMsg("Save failed"); } };
 
   const btnPrimary = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: T.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: T.font };
@@ -186,7 +234,7 @@ function Dashboard({ onEdit }) {
             <div>Name</div><div>Status</div><div>Number / Inbox</div><div style={{ textAlign: "right" }}>Actions</div>
           </div>
           {flows === null && <div style={{ padding: 20, color: T.sub, fontSize: 13 }}>Loading…</div>}
-          {flows && flows.length === 0 && <div style={{ padding: 24, color: T.sub, fontSize: 13 }}>Abhi koi chatbot nahi. “Create Chatbot” se shuru karein.</div>}
+          {flows && flows.length === 0 && <div style={{ padding: 24, color: T.sub, fontSize: 13 }}>No chatbots yet. Click “Create Chatbot” to get started.</div>}
           {flows && flows.map((f) => {
             const cur = f.inbox_id ?? ""; const sel = pendingInbox[f.id] !== undefined ? pendingInbox[f.id] : cur;
             const dirty = pendingInbox[f.id] !== undefined && String(pendingInbox[f.id]) !== String(cur);
@@ -226,7 +274,7 @@ function Dashboard({ onEdit }) {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={() => setConfirmDel(null)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 360, fontFamily: T.font }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Delete chatbot?</div>
-            <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>“{confirmDel.name}” permanently delete ho jayega.</div>
+            <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>“{confirmDel.name}” will be permanently deleted.</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button style={btnGhost} onClick={() => setConfirmDel(null)}>Cancel</button>
               <button style={{ ...btnPrimary, background: "#dc2626" }} onClick={doDelete}>Delete</button>
@@ -239,30 +287,6 @@ function Dashboard({ onEdit }) {
 }
 
 // ===================== GALLERY (DARK — media library) =====================
-// iframe-safe clipboard (cross-origin + http par navigator.clipboard kaam nahi karta)
-function copyText(text) {
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text; ta.style.position = "fixed"; ta.style.top = "-9999px"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch { return false; }
-}
-function fmtSize(b) {
-  if (b == null) return "";
-  if (b < 1024) return b + " B";
-  if (b < 1048576) return Math.round(b / 1024) + " KB";
-  return (b / 1048576).toFixed(1) + " MB";
-}
-const GTYPE = {
-  image: { icon: "🖼️", label: "Image", color: NC.start },
-  video: { icon: "🎬", label: "Video", color: NC.question },
-  audio: { icon: "🎵", label: "Audio", color: NC.buttons },
-  document: { icon: "📄", label: "Doc", color: "#f59e0b" },
-};
-
 function Gallery() {
   const [media, setMedia] = useState(null);     // null=loading, []=empty
   const [msg, setMsg] = useState("");
@@ -275,7 +299,7 @@ function Gallery() {
 
   const load = async () => {
     try { const j = await (await fetch(`${API}/api/media?account_id=${ACCOUNT_ID}`)).json(); setMedia(j.media || []); }
-    catch { setMedia([]); setMsg("Media load nahi hui — bot engine band to nahi?"); }
+    catch { setMedia([]); setMsg("Couldn't load media — is the bot engine running?"); }
   };
   useEffect(() => { load(); }, []);
 
@@ -294,19 +318,19 @@ function Gallery() {
       } catch { fail++; }
     }
     setUploading(false);
-    if (fail) setMsg(`${fail} file upload nahi hui.`);
+    if (fail) setMsg(`${fail} file(s) failed to upload.`);
     await load();
   };
 
   const doDelete = async () => {
     const m = confirmDel; setConfirmDel(null); if (!m) return;
     try { await fetch(`${API}/api/media/${m.id}`, { method: "DELETE" }); await load(); }
-    catch { setMsg("Delete fail ho gaya."); }
+    catch { setMsg("Delete failed."); }
   };
 
   const doCopy = (m) => {
     if (copyText(m.url)) { setCopiedId(m.id); setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1500); }
-    else setMsg("Copy nahi hua — link manually copy karein.");
+    else setMsg("Copy failed — please copy the link manually.");
   };
 
   const list = (media || []).filter((m) => filter === "all" || m.type === filter);
@@ -318,11 +342,10 @@ function Gallery() {
 
   return (
     <div style={wrap}>
-      {/* Top bar */}
       <div style={{ position: "sticky", top: 0, zIndex: 10, background: D.panel, borderBottom: `1px solid ${D.border}`, padding: "16px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700, color: D.text }}>Media Gallery</div>
-          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>Images, videos, audio &amp; documents — chatbot mein bhejne ke liye</div>
+          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>Images, videos, audio &amp; documents to use in your chatbots</div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
           <input ref={fileRef} type="file" multiple accept="image/*,video/*,audio/*,application/pdf" onChange={onFiles} style={{ display: "none" }} />
@@ -330,7 +353,6 @@ function Gallery() {
         </div>
       </div>
 
-      {/* Filters */}
       <div style={{ display: "flex", gap: 8, padding: "16px 24px 0", flexWrap: "wrap" }}>
         {filters.map(([key, lbl]) => {
           const active = filter === key;
@@ -345,14 +367,13 @@ function Gallery() {
 
       {msg && <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: hexA("#f43f5e", .12), border: `1px solid ${hexA("#f43f5e", .4)}`, color: "#fda4af", borderRadius: 8, fontSize: 13 }}>{msg}</div>}
 
-      {/* Grid */}
       <div style={{ padding: 24 }}>
         {media === null && <div style={{ color: D.sub, fontSize: 14, padding: 20 }}>Loading…</div>}
         {media && list.length === 0 && (
           <div style={{ border: `1px dashed ${D.border}`, borderRadius: 14, padding: "48px 24px", textAlign: "center", color: D.sub, background: D.panel2 }}>
             <div style={{ fontSize: 34, marginBottom: 10 }}>🖼️</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: D.text, marginBottom: 4 }}>{filter === "all" ? "Abhi koi media nahi" : "Is type ki koi file nahi"}</div>
-            <div style={{ fontSize: 13 }}>Upar “Upload media” se files add karein.</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: D.text, marginBottom: 4 }}>{filter === "all" ? "No media yet" : "No files of this type"}</div>
+            <div style={{ fontSize: 13 }}>Click “Upload media” above to add files.</div>
           </div>
         )}
         {media && list.length > 0 && (
@@ -387,12 +408,11 @@ function Gallery() {
         )}
       </div>
 
-      {/* Delete modal (iframe-safe, no confirm()) */}
       {confirmDel && (
         <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, padding: 22, width: 360, maxWidth: "100%", fontFamily: T.font, boxShadow: "0 24px 60px rgba(0,0,0,.7)" }}>
             <div style={{ fontWeight: 700, fontSize: 16, color: D.text, marginBottom: 8 }}>Delete media?</div>
-            <div style={{ fontSize: 13, color: D.sub, marginBottom: 18 }}>“{confirmDel.original_name || confirmDel.filename || "file"}” permanently delete ho jayegi.</div>
+            <div style={{ fontSize: 13, color: D.sub, marginBottom: 18 }}>“{confirmDel.original_name || confirmDel.filename || "file"}” will be permanently deleted.</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button onClick={() => setConfirmDel(null)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: `1px solid ${D.border}`, background: D.panel2, color: D.text }}>Cancel</button>
               <button onClick={doDelete} style={{ padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, border: "none", background: "#dc2626", color: "#fff" }}>Delete</button>
@@ -401,12 +421,58 @@ function Gallery() {
         </div>
       )}
 
-      {/* Image lightbox */}
       {preview && (
         <div onClick={() => setPreview(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 210, padding: 24, cursor: "zoom-out" }}>
           <img src={preview.url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10, boxShadow: "0 20px 60px rgba(0,0,0,.8)" }} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ===================== MEDIA PICKER (used in Editor) =====================
+function MediaPicker({ onPick, onClose }) {
+  const [media, setMedia] = useState(null);
+  const [filter, setFilter] = useState("all");
+  useEffect(() => {
+    (async () => {
+      try { const j = await (await fetch(`${API}/api/media?account_id=${ACCOUNT_ID}`)).json(); setMedia(j.media || []); }
+      catch { setMedia([]); }
+    })();
+  }, []);
+  const list = (media || []).filter((m) => filter === "all" || m.type === filter);
+  const filters = [["all", "All"], ["image", "Images"], ["video", "Videos"], ["audio", "Audio"], ["document", "Docs"]];
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 760, maxWidth: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, fontFamily: T.font, boxShadow: "0 24px 60px rgba(0,0,0,.7)", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: `1px solid ${D.border}` }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: D.text }}>Choose media</div>
+          <button onClick={onClose} style={{ marginLeft: "auto", border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13, fontFamily: T.font }}>✕ Close</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, padding: "12px 18px 0", flexWrap: "wrap" }}>
+          {filters.map(([k, l]) => { const act = filter === k; return <button key={k} onClick={() => setFilter(k)} style={{ padding: "5px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${act ? "#3b82f6" : D.border}`, background: act ? hexA("#3b82f6", .18) : D.panel2, color: act ? "#93c5fd" : D.sub }}>{l}</button>; })}
+        </div>
+        <div style={{ padding: 18, overflowY: "auto" }}>
+          {media === null && <div style={{ color: D.sub, fontSize: 14 }}>Loading…</div>}
+          {media && list.length === 0 && <div style={{ color: D.sub, fontSize: 14, padding: "20px 0", textAlign: "center" }}>No media yet. Upload some in the Gallery first.</div>}
+          {media && list.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
+              {list.map((m) => { const meta = GTYPE[m.type] || GTYPE.document; const name = m.original_name || m.filename || "file"; return (
+                <div key={m.id} onClick={() => onPick(m)} className="cs-gcard" style={{ cursor: "pointer", background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, overflow: "hidden", transition: "transform .15s, border-color .15s, box-shadow .15s" }}>
+                  <div style={{ position: "relative", height: 104, background: D.input, display: "grid", placeItems: "center", overflow: "hidden" }}>
+                    {m.type === "image" ? <img src={m.url} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : m.type === "video" ? <video src={m.url} preload="metadata" muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ fontSize: 36 }}>{meta.icon}</div>}
+                    <span style={{ position: "absolute", top: 6, left: 6, padding: "1px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: hexA(meta.color, .22), color: meta.color, border: `1px solid ${hexA(meta.color, .5)}` }}>{meta.label}</span>
+                  </div>
+                  <div style={{ padding: "7px 9px" }}>
+                    <div title={name} style={{ fontSize: 12, fontWeight: 600, color: D.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
+                    <div style={{ fontSize: 10.5, color: D.faint, marginTop: 1 }}>{fmtSize(m.size)}</div>
+                  </div>
+                </div>
+              ); })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -419,6 +485,7 @@ function Editor({ flowId, onBack }) {
   const [status, setStatus] = useState("Loading…");
   const [name, setName] = useState("");
   const [flowStatus, setFlowStatus] = useState("draft");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const idRef = useRef(1);
 
   useEffect(() => {
@@ -435,7 +502,7 @@ function Editor({ flowId, onBack }) {
 
   async function save(publish) {
     const definition = toEngineFormat(nodes, edges);
-    if (publish && !definition.start) { setStatus("⚠️ Start ko kisi node se connect karein"); return; }
+    if (publish && !definition.start) { setStatus("⚠️ Connect Start to a node first"); return; }
     setStatus(publish ? "Publishing…" : "Saving…");
     try {
       await fetch(`${API}/api/flows/${flowId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, definition }) });
@@ -450,7 +517,7 @@ function Editor({ flowId, onBack }) {
     <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", fontFamily: T.font, background: D.bg }}>
       <div style={{ height: 56, background: D.panel, borderBottom: `1px solid ${D.border}`, display: "flex", alignItems: "center", padding: "0 16px", gap: 12 }}>
         <button onClick={onBack} style={dGhost}>← Back</button>
-        <input className="cs-in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Chatbot ka naam" style={{ borderRadius: 8, padding: "7px 10px", fontSize: 14, fontWeight: 600, fontFamily: T.font, minWidth: 200 }} />
+        <input className="cs-in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Chatbot name" style={{ borderRadius: 8, padding: "7px 10px", fontSize: 14, fontWeight: 600, fontFamily: T.font, minWidth: 200 }} />
         <span style={{ fontSize: 12, color: D.sub }}>{status}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           {flowStatus === "published" && <button onClick={unpublish} style={{ ...dGhost, color: D.sub }}>Unpublish</button>}
@@ -468,7 +535,7 @@ function Editor({ flowId, onBack }) {
               {p.label}
             </button>
           ))}
-          <div style={{ fontSize: 11, color: D.faint, marginTop: 14, lineHeight: 1.6 }}>Node add karein, dots se connect karein. Line ke beech <b style={{ color: "#fb7185" }}>✕</b> se connection hatega.</div>
+          <div style={{ fontSize: 11, color: D.faint, marginTop: 14, lineHeight: 1.6 }}>Add nodes and connect them using the dots. Click the <b style={{ color: "#fb7185" }}>✕</b> on a line to remove a connection.</div>
         </div>
 
         <div style={{ flex: 1, background: D.bg, backgroundImage: "radial-gradient(circle at 30% 20%, rgba(99,102,241,.06), transparent 40%), radial-gradient(circle at 80% 80%, rgba(34,211,238,.05), transparent 40%)" }}>
@@ -482,17 +549,34 @@ function Editor({ flowId, onBack }) {
         </div>
 
         <div style={{ width: 294, background: D.panel, borderLeft: `1px solid ${D.border}`, padding: 16, overflowY: "auto" }}>
-          {!selected && <div style={{ color: D.faint, fontSize: 13 }}>Koi node select karein editing ke liye.</div>}
-          {selected && selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><In value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} placeholder="hi, hello, menu" /><Hn>Start ko kisi node se connect karein.</Hn></Ed>)}
+          {!selected && <div style={{ color: D.faint, fontSize: 13 }}>Select a node to edit.</div>}
+          {selected && selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><In value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} placeholder="hi, hello, menu" /><Hn>Connect Start to your first node.</Hn></Ed>)}
           {selected && selected.type === "text" && (<Ed title="💬 Send Text"><Lb>Message</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /></Ed>)}
           {selected && selected.type === "buttons" && (<Ed title="🔘 Send Buttons"><Lb>Body text</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /><Lb>Buttons</Lb>
             {(selected.data.buttons || []).map((b, i) => (<div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}><In value={b.title} onChange={(v) => { const arr = [...selected.data.buttons]; arr[i] = { ...arr[i], title: v }; updateData(selected.id, { buttons: arr }); }} placeholder={`Button ${i + 1}`} /><button onClick={() => { const arr = selected.data.buttons.filter((_, j) => j !== i); updateData(selected.id, { buttons: arr }); }} style={{ border: "1px solid rgba(244,63,94,.5)", color: "#fb7185", background: "transparent", borderRadius: 6, cursor: "pointer", padding: "0 10px" }}>✕</button></div>))}
-            <button onClick={() => updateData(selected.id, { buttons: [...(selected.data.buttons || []), { title: "" }] })} style={{ marginTop: 4, padding: "8px 12px", border: "1px dashed #22c55e", color: "#4ade80", background: "rgba(34,197,94,.08)", borderRadius: 8, cursor: "pointer", width: "100%" }}>+ Add Button</button><Hn>Har button ke right dot ko agle node se connect karein.</Hn></Ed>)}
-          {selected && selected.type === "question" && (<Ed title="❓ Ask Question"><Lb>Sawaal</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /><Lb>Jawab kis naam se save ho</Lb><In value={selected.data.saveAs || ""} onChange={(v) => updateData(selected.id, { saveAs: v })} placeholder="naam, email…" /></Ed>)}
+            <button onClick={() => updateData(selected.id, { buttons: [...(selected.data.buttons || []), { title: "" }] })} style={{ marginTop: 4, padding: "8px 12px", border: "1px dashed #22c55e", color: "#4ade80", background: "rgba(34,197,94,.08)", borderRadius: 8, cursor: "pointer", width: "100%" }}>+ Add Button</button><Hn>Connect each button’s right dot to the next node.</Hn></Ed>)}
+          {selected && selected.type === "media" && (<Ed title="🖼️ Send Media">
+            {selected.data.url ? (<div style={{ marginBottom: 10 }}>
+              {selected.data.mediaType === "image"
+                ? <img src={selected.data.url} alt="" style={{ width: "100%", borderRadius: 8, border: `1px solid ${D.border}` }} />
+                : <div style={{ padding: 10, border: `1px solid ${D.border}`, borderRadius: 8, background: D.input, color: D.sub, fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><span>{GTYPE[selected.data.mediaType]?.icon || "📄"}</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.data.name || "media"}</span></div>}
+            </div>) : null}
+            <button onClick={() => setPickerOpen(true)} style={{ width: "100%", padding: "9px 12px", border: "1px dashed #f59e0b", color: "#fbbf24", background: "rgba(245,158,11,.08)", borderRadius: 8, cursor: "pointer", fontFamily: T.font, fontSize: 13, fontWeight: 600 }}>📁 Choose from gallery</button>
+            <Lb>Or paste a link</Lb>
+            <In value={selected.data.url || ""} onChange={(v) => updateData(selected.id, { url: v, mediaType: guessType(v), name: (v.split("?")[0].split("/").pop() || "") })} placeholder="https://…/file.jpg" />
+            <Lb>Caption (optional)</Lb>
+            <Ar value={selected.data.caption || ""} onChange={(v) => updateData(selected.id, { caption: v })} />
+            <Hn>Pick from your Gallery or paste a direct file link. The caption is sent as the message text.</Hn>
+          </Ed>)}
+          {selected && selected.type === "question" && (<Ed title="❓ Ask Question"><Lb>Question</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /><Lb>Save answer as</Lb><In value={selected.data.saveAs || ""} onChange={(v) => updateData(selected.id, { saveAs: v })} placeholder="name, email…" /></Ed>)}
           {selected && selected.type === "stop" && (<Ed title="🛑 Stop / Talk to Human"><Lb>Message (optional)</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /></Ed>)}
           {selected && selected.deletable !== false && (<button onClick={() => { setNodes((nds) => nds.filter((n) => n.id !== selected.id)); setEdges((e) => e.filter((ed) => ed.source !== selected.id && ed.target !== selected.id)); setSelectedId(null); }} style={{ marginTop: 16, width: "100%", padding: "9px 12px", border: "1px solid rgba(244,63,94,.5)", color: "#fb7185", background: "rgba(244,63,94,.08)", borderRadius: 8, cursor: "pointer" }}>Delete node</button>)}
         </div>
       </div>
+
+      {pickerOpen && selected && selected.type === "media" && (
+        <MediaPicker onClose={() => setPickerOpen(false)} onPick={(m) => { updateData(selected.id, { url: m.url, mediaType: m.type, name: m.original_name || m.filename || "" }); setPickerOpen(false); }} />
+      )}
     </div>
   );
 }
