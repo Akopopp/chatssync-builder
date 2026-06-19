@@ -15,7 +15,7 @@ const T = { blue: "#2563eb", text: "#1f2d3d", sub: "#64748b", border: "#e5e7eb",
 // Dark theme (CANVAS / EDITOR) — clean & professional
 const D = { bg: "#0B0F17", panel: "#0F141E", panel2: "#161C28", card: "#161C28", border: "#242C3A", text: "#E8ECF3", sub: "#94A0B4", faint: "#5C6878", input: "#0F1622" };
 // Muted, professional accent per node type
-const NC = { start: "#5B8DEF", text: "#4C84FF", buttons: "#2EA66B", list: "#9B6DF0", media: "#C8902B", cta: "#3A7DE0", question: "#4F90E8", delay: "#7C8696", condition: "#CC6A2E", tag: "#D9694A", stop: "#E5524A" };
+const NC = { start: "#5B8DEF", text: "#4C84FF", buttons: "#2EA66B", list: "#9B6DF0", media: "#C8902B", cta: "#3A7DE0", question: "#4F90E8", delay: "#7C8696", condition: "#CC6A2E", tag: "#D9694A", form: "#2B9F94", stop: "#E5524A" };
 const ACCENT = "#4C84FF";
 
 const OPERATORS = [
@@ -155,9 +155,18 @@ function TagNode({ data, selected }) {
     </div>
     <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
 }
+function FormNode({ data, selected }) {
+  const a = NC.form; const fields = (data.fields || []).filter((f) => (f.label || "").trim());
+  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="📝" title="Send Form" />
+    <div style={nbody}>{data.intro || "Collect details from the customer"}</div>
+    <div style={{ padding: "0 13px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
+      {fields.length ? fields.map((fd, i) => (<div key={i} style={{ fontSize: 11.5, color: D.text, display: "flex", gap: 6, alignItems: "center" }}><span style={{ color: a, fontWeight: 700 }}>{i + 1}.</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fd.label}</span></div>)) : <span style={{ fontSize: 12, color: D.faint }}>No fields yet</span>}
+    </div>
+    <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
+}
 function StopNode({ data, selected }) { const a = NC.stop; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🛑" title="Stop Chatbot" /><div style={nbody}>{data.text || "(no message — hands over to a human)"}</div></div>); }
 
-const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, list: ListNode, media: MediaNode, cta: CtaNode, question: QuestionNode, delay: DelayNode, condition: ConditionNode, tag: TagNode, stop: StopNode };
+const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, list: ListNode, media: MediaNode, cta: CtaNode, question: QuestionNode, delay: DelayNode, condition: ConditionNode, tag: TagNode, form: FormNode, stop: StopNode };
 
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }) {
   const { onDeleteEdge } = useContext(EdgeCtx) || {};
@@ -182,6 +191,7 @@ function defaultData(kind) {
   if (kind === "delay") return { value: 1, unit: "seconds" };
   if (kind === "condition") return { match: "all", conditions: [{ first: "{{last_message}}", operator: "contains", second: "" }] };
   if (kind === "tag") return { labels: "" };
+  if (kind === "form") return { intro: "Please fill this quick form:", fields: [{ label: "Apna naam likhein", key: "naam" }, { label: "Phone number", key: "phone" }], submitMessage: "Shukriya! Hum jald rabta karenge 🙌" };
   if (kind === "stop") return { text: "Connecting you to an agent 🙌" };
   return {};
 }
@@ -193,6 +203,7 @@ const PALETTE = [
     { kind: "media", label: "Send Media", icon: "🖼️", color: NC.media },
     { kind: "cta", label: "Send CTA", icon: "🔗", color: NC.cta },
     { kind: "question", label: "Ask Question", icon: "❓", color: NC.question },
+    { kind: "form", label: "Send Form", icon: "📝", color: NC.form },
   ]},
   { group: "Logic", items: [
     { kind: "delay", label: "Delay", icon: "⏱️", color: NC.delay },
@@ -225,6 +236,7 @@ function toEngineFormat(nodes, edges) {
     else if (n.type === "cta") def.nodes[n.id] = { type: "cta", header: hdr(d), body: d.body || "", display: d.display || "", url: d.url || "", footer: d.footer || "", next: plainNext[n.id] || null };
     else if (n.type === "delay") def.nodes[n.id] = { type: "delay", seconds: (d.unit === "minutes" ? (parseInt(d.value, 10) || 0) * 60 : (parseInt(d.value, 10) || 0)), next: plainNext[n.id] || null };
     else if (n.type === "tag") def.nodes[n.id] = { type: "tag", labels: (d.labels || "").split(",").map((x) => x.trim()).filter(Boolean), next: plainNext[n.id] || null };
+    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => ({ label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)) })), submit_message: d.submitMessage || "", next: plainNext[n.id] || null };
     else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: d.text || "" };
     else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: plainNext[n.id] || null };
     else if (n.type === "condition") def.nodes[n.id] = { type: "condition", match: d.match || "all", conditions: (d.conditions || []).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })), next_true: condTrue[n.id] || null, next_false: condFalse[n.id] || null };
@@ -253,6 +265,7 @@ function fromEngineFormat(def) {
     if (kind === "question") { data.text = node.text || ""; data.saveAs = node.save_as || "answer"; data.responseFormat = node.response_format || "any"; const ts = node.timeout_seconds || 0; if (ts && ts % 60 === 0 && ts >= 60) { data.timeoutValue = ts / 60; data.timeoutUnit = "minutes"; } else { data.timeoutValue = ts; data.timeoutUnit = "seconds"; } data.timeoutMessage = node.timeout_message || ""; data.continueOnTimeout = !!node.continue_on_timeout; }
     if (kind === "condition") { data.match = node.match || "all"; data.conditions = (Array.isArray(node.conditions) && node.conditions.length ? node.conditions : [{ first: node.first || "{{last_message}}", operator: node.operator || "contains", second: node.second || "" }]).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })); }
     if (kind === "tag") data.labels = (node.labels || []).join(", ");
+    if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "" })); data.submitMessage = node.submit_message || ""; }
     if (kind === "buttons") { data.header = node.header || { type: "none", value: "" }; data.text = node.text || ""; data.footer = node.footer || ""; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
@@ -683,6 +696,20 @@ function Editor({ flowId, onBack }) {
               <Hn>No timer = bot simply waits for a reply, then continues. With a timer: if no reply in time, it sends the timeout message and either continues (toggle on) or stops (toggle off).</Hn></Ed>)}
 
             {selected.type === "delay" && (<Ed title="⏱️ Delay"><Lb>Wait</Lb><div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={1} value={selected.data.value || 1} onChange={(e) => updateData(selected.id, { value: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.unit || "seconds"} onChange={(v) => updateData(selected.id, { unit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div><Hn>Pauses the flow before the next step (max 5 minutes).</Hn></Ed>)}
+            {selected.type === "form" && (<Ed title="📝 Send Form">
+              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Bot asks each field one by one, saves every answer, then posts the filled form back in the chat (customer + agent both see it). Each answer is also reusable later as <b style={{ color: D.sub }}>{"{{key}}"}</b>.</div>
+              <Lb>Intro message (optional)</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="Please fill this quick form:" />
+              <Lb>Fields</Lb>
+              {(selected.data.fields || []).map((fd, i) => (
+                <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
+                  <Lb>Question {i + 1}</Lb><In value={fd.label} onChange={(v) => { const fs = [...selected.data.fields]; fs[i] = { ...fs[i], label: v }; updateData(selected.id, { fields: fs }); }} placeholder="e.g. Apni location batayein" />
+                  <div style={{ height: 6 }} /><Lb>Save as (one word)</Lb><In value={fd.key} onChange={(v) => { const fs = [...selected.data.fields]; fs[i] = { ...fs[i], key: v.replace(/\s+/g, "_") }; updateData(selected.id, { fields: fs }); }} placeholder="location" />
+                  {(selected.data.fields || []).length > 1 && <button onClick={() => updateData(selected.id, { fields: selected.data.fields.filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove field</button>}
+                </div>
+              ))}
+              <button onClick={() => updateData(selected.id, { fields: [...(selected.data.fields || []), { label: "", key: "" }] })} style={addBtn(NC.form)}>+ Add Field</button>
+              <Lb>Message after submit (optional)</Lb><Ar value={selected.data.submitMessage || ""} onChange={(v) => updateData(selected.id, { submitMessage: v })} placeholder="Shukriya! Hum jald rabta karenge." />
+              <Hn>Tip: keep “Save as” one word (location, phone, naam) so you can reuse it later as {"{{location}}"}.</Hn></Ed>)}
 
             {selected.type === "condition" && (<Ed title="🔀 Condition">
               <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>If the check below is <b style={{ color: NC.buttons }}>true</b> → bot follows the <b style={{ color: NC.buttons }}>green</b> line. If <b style={{ color: NC.stop }}>false</b> → the <b style={{ color: NC.stop }}>red</b> line. By default it checks the customer's last message.</div>
