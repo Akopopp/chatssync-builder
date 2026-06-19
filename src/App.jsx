@@ -201,11 +201,11 @@ const PALETTE = [
     { kind: "stop", label: "Stop Chatbot", icon: "🛑", color: NC.stop },
   ]},
 ];
-const startNode = () => ({ id: "start", type: "start", position: { x: 340, y: 30 }, data: { keywords: "", fuzzy: false }, deletable: false });
+const startNode = () => ({ id: "start", type: "start", position: { x: 340, y: 30 }, data: { keywords: "", fuzzy: false, sensitivity: 80 }, deletable: false });
 const hdr = (d) => ({ type: (d.header && d.header.type) || "none", value: (d.header && d.header.value) || "" });
 
 function toEngineFormat(nodes, edges) {
-  const def = { start: null, trigger: { keywords: [], fuzzy: false }, nodes: {} };
+  const def = { start: null, trigger: { keywords: [], fuzzy: false, sensitivity: 80 }, layout: {}, nodes: {} };
   const plainNext = {}, btnNext = {}, rowNext = {}, condTrue = {}, condFalse = {};
   for (const e of edges) {
     const h = e.sourceHandle;
@@ -216,9 +216,10 @@ function toEngineFormat(nodes, edges) {
     else plainNext[e.source] = e.target;
   }
   def.start = plainNext["start"] || null;
+  for (const n of nodes) def.layout[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
   for (const n of nodes) {
     const d = n.data || {};
-    if (n.type === "start") { def.trigger = { keywords: (d.keywords || "").split(",").map((x) => x.trim()).filter(Boolean), fuzzy: !!d.fuzzy }; continue; }
+    if (n.type === "start") { def.trigger = { keywords: (d.keywords || "").split(",").map((x) => x.trim()).filter(Boolean), fuzzy: !!d.fuzzy, sensitivity: parseInt(d.sensitivity, 10) || 80 }; continue; }
     else if (n.type === "text") def.nodes[n.id] = { type: "text", text: d.text || "", next: plainNext[n.id] || null };
     else if (n.type === "media") def.nodes[n.id] = { type: "media", url: d.url || "", media_type: d.mediaType || "", name: d.name || "", caption: d.caption || "", next: plainNext[n.id] || null };
     else if (n.type === "cta") def.nodes[n.id] = { type: "cta", header: hdr(d), body: d.body || "", display: d.display || "", url: d.url || "", footer: d.footer || "", next: plainNext[n.id] || null };
@@ -238,7 +239,8 @@ function toEngineFormat(nodes, edges) {
 }
 function fromEngineFormat(def) {
   const start = startNode();
-  if (def && def.trigger) start.data = { keywords: (def.trigger.keywords || []).join(", "), fuzzy: !!def.trigger.fuzzy };
+  if (def && def.trigger) start.data = { keywords: (def.trigger.keywords || []).join(", "), fuzzy: !!def.trigger.fuzzy, sensitivity: def.trigger.sensitivity || 80 };
+  if (def && def.layout && def.layout.start) start.position = def.layout.start;
   const nodes = [start]; const edges = []; const y = 200;
   const ids = Object.keys((def && def.nodes) || {});
   ids.forEach((id, idx) => {
@@ -254,7 +256,7 @@ function fromEngineFormat(def) {
     if (kind === "buttons") { data.header = node.header || { type: "none", value: "" }; data.text = node.text || ""; data.footer = node.footer || ""; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
-    nodes.push({ id, type: kind, position: { x: 340 + (idx % 2) * 330, y: y + idx * 135 }, data });
+    nodes.push({ id, type: kind, position: (def.layout && def.layout[id]) ? def.layout[id] : { x: 340 + (idx % 2) * 330, y: y + idx * 135 }, data });
     if (kind === "buttons") (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-b${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); });
     else if (kind === "list") { let gi = 0; (normSecs || []).forEach((sec) => (sec.rows || []).forEach((r) => { if (r.next) edges.push({ id: `e-${id}-r${gi}`, source: id, sourceHandle: `row-${gi}`, target: r.next, type: "deletable", animated: true }); gi++; })); }
     else if (kind === "condition") { if (node.next_true) edges.push({ id: `e-${id}-t`, source: id, sourceHandle: "cond-true", target: node.next_true, type: "deletable", animated: true }); if (node.next_false) edges.push({ id: `e-${id}-f`, source: id, sourceHandle: "cond-false", target: node.next_false, type: "deletable", animated: true }); }
@@ -612,7 +614,7 @@ function Editor({ flowId, onBack }) {
               <button onClick={() => setSelectedId(null)} title="Close" style={{ marginLeft: "auto", width: 26, height: 26, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 13 }}>✕</button>
             </div>
 
-            {selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><In value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} placeholder="hi, hello, menu" /><Tog on={!!selected.data.fuzzy} onClick={() => updateData(selected.id, { fuzzy: !selected.data.fuzzy })} label="Enable fuzzy matching" /><Hn>Leave keywords empty to start on any message. With keywords, the bot only starts when the message matches one.</Hn></Ed>)}
+            {selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><KeywordChips value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} /><Tog on={!!selected.data.fuzzy} onClick={() => updateData(selected.id, { fuzzy: !selected.data.fuzzy })} label="Enable fuzzy matching" />{selected.data.fuzzy && (<><Lb>Match sensitivity: {selected.data.sensitivity ?? 80}%</Lb><Slider value={selected.data.sensitivity ?? 80} onChange={(v) => updateData(selected.id, { sensitivity: v })} /><div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: D.faint, marginTop: 2 }}><span>Exact</span><span>Very loose</span></div></>)}<Hn>No keywords = starts on any message. With fuzzy OFF, only an exact match starts the bot. With fuzzy ON, close/partial matches start it, based on the sensitivity.</Hn></Ed>)}
 
             {selected.type === "text" && (<Ed title="💬 Send Text"><Lb>Message</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /></Ed>)}
 
@@ -745,4 +747,17 @@ function Hn({ children }) { return <div style={{ fontSize: 11, color: D.faint, m
 function In({ value, onChange, placeholder, maxLength }) { return (<input className="cs-in" value={value} placeholder={placeholder} maxLength={maxLength} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} />); }
 function Ar({ value, onChange }) { return (<textarea className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} rows={4} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} />); }
 function Sel({ value, onChange, options }) { return (<select className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>{options.map(([v, l]) => (<option key={v} value={v} style={{ background: D.panel2 }}>{l}</option>))}</select>); }
+function KeywordChips({ value, onChange }) {
+  const [input, setInput] = useState("");
+  const chips = (value || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const add = (raw) => { const t = (raw || "").trim().replace(/,+$/, "").trim(); if (!t) { setInput(""); return; } if (!chips.some((c) => c.toLowerCase() === t.toLowerCase())) onChange([...chips, t].join(", ")); setInput(""); };
+  const remove = (i) => onChange(chips.filter((_, j) => j !== i).join(", "));
+  return (
+    <div style={{ border: "1px solid #2A3340", borderRadius: 7, background: D.input, padding: "6px 8px", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+      {chips.map((c, i) => (<span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 3px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: hexA(NC.start, .16), color: NC.start, border: `1px solid ${hexA(NC.start, .4)}` }}>{c}<span onClick={() => remove(i)} style={{ cursor: "pointer", width: 16, height: 16, borderRadius: "50%", display: "grid", placeItems: "center", background: hexA(NC.start, .25) }}>×</span></span>))}
+      <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(input); } else if (e.key === "Backspace" && !input && chips.length) { remove(chips.length - 1); } }} onBlur={() => add(input)} placeholder={chips.length ? "Add keyword…" : "Type a keyword, press Enter"} style={{ flex: 1, minWidth: 120, border: "none", outline: "none", background: "transparent", color: D.text, fontSize: 13, fontFamily: T.font, padding: "3px 0" }} />
+    </div>
+  );
+}
+function Slider({ value, onChange }) { return (<input type="range" min={50} max={100} step={5} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: NC.start, cursor: "pointer" }} />); }
 function Tog({ on, onClick, label }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: "10px 0 2px" }}><div style={{ width: 34, height: 20, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} /></div><span style={{ fontSize: 12.5, color: D.text }}>{label}</span></div>); }
