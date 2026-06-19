@@ -599,7 +599,7 @@ function Editor({ flowId, onBack }) {
 
         <div style={{ flex: 1, background: D.bg }}>
           <EdgeCtx.Provider value={{ onDeleteEdge }}>
-            <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { setSelectedId(n.id); setTagOpen(false); }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
+            <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
               <Background color="#1a2230" gap={20} size={1} />
               <Controls />
               <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || ACCENT} maskColor="rgba(7,10,16,.7)" />
@@ -670,30 +670,33 @@ function Editor({ flowId, onBack }) {
               <Hn>Sends your text with a clickable link to the customer.</Hn></Ed>)}
 
             {selected.type === "question" && (<Ed title="❓ Ask Question">
+              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Bot asks this, then <b>waits</b> for the customer's reply, saves it, and moves to the next node. Use the saved value later as <b style={{ color: D.sub }}>{"{{" + (selected.data.saveAs || "answer") + "}}"}</b>.</div>
               <Lb>Message</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} />
               <Lb>Response format</Lb><Sel value={selected.data.responseFormat || "any"} onChange={(v) => updateData(selected.id, { responseFormat: v })} options={RESPONSE_FORMATS} />
+              <Hn>“Any response” accepts whatever they type. Other formats re-ask until it matches.</Hn>
               <Lb>Save answer as</Lb><In value={selected.data.saveAs || ""} onChange={(v) => updateData(selected.id, { saveAs: v })} placeholder="name, email…" />
               <Lb>Timeout</Lb>
               <div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={0} value={selected.data.timeoutValue ?? 0} onChange={(e) => updateData(selected.id, { timeoutValue: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.timeoutUnit || "seconds"} onChange={(v) => updateData(selected.id, { timeoutUnit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div>
               <Hn>0 = no timeout.</Hn>
               <Lb>Timeout message (optional)</Lb><Ar value={selected.data.timeoutMessage || ""} onChange={(v) => updateData(selected.id, { timeoutMessage: v })} />
               <Tog on={!!selected.data.continueOnTimeout} onClick={() => updateData(selected.id, { continueOnTimeout: !selected.data.continueOnTimeout })} label="Continue on timeout" />
-              <Hn>If on, the flow continues after timeout; if off, it stops. The reply is validated against the format and re-asked if it doesn't match.</Hn></Ed>)}
+              <Hn>No timer = bot simply waits for a reply, then continues. With a timer: if no reply in time, it sends the timeout message and either continues (toggle on) or stops (toggle off).</Hn></Ed>)}
 
             {selected.type === "delay" && (<Ed title="⏱️ Delay"><Lb>Wait</Lb><div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={1} value={selected.data.value || 1} onChange={(e) => updateData(selected.id, { value: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.unit || "seconds"} onChange={(v) => updateData(selected.id, { unit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div><Hn>Pauses the flow before the next step (max 5 minutes).</Hn></Ed>)}
 
             {selected.type === "condition" && (<Ed title="🔀 Condition">
-              <Lb>Match</Lb><Sel value={selected.data.match || "all"} onChange={(v) => updateData(selected.id, { match: v })} options={[["all", "All conditions"], ["any", "Any condition"]]} />
+              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>If the check below is <b style={{ color: NC.buttons }}>true</b> → bot follows the <b style={{ color: NC.buttons }}>green</b> line. If <b style={{ color: NC.stop }}>false</b> → the <b style={{ color: NC.stop }}>red</b> line. By default it checks the customer's last message.</div>
+              <Lb>Match</Lb><Sel value={selected.data.match || "all"} onChange={(v) => updateData(selected.id, { match: v })} options={[["all", "All conditions must be true"], ["any", "Any one condition is enough"]]} />
               <Lb>Conditions</Lb>
               {(selected.data.conditions || []).map((c, i) => { const noSecond = c.operator === "is_email" || c.operator === "is_phone"; return (
                 <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
-                  <In value={c.first} onChange={(v) => setCond(i, { first: v })} placeholder="{{last_message}}" />
-                  <div style={{ height: 6 }} /><Sel value={c.operator || "equals"} onChange={(v) => setCond(i, { operator: v })} options={OPERATORS} />
-                  {!noSecond && (<><div style={{ height: 6 }} /><In value={c.second} onChange={(v) => setCond(i, { second: v })} placeholder="value to compare" /></>)}
+                  <Lb>Check this</Lb><In value={c.first} onChange={(v) => setCond(i, { first: v })} placeholder="{{last_message}}" />
+                  <div style={{ height: 6 }} /><Lb>Operator</Lb><Sel value={c.operator || "equals"} onChange={(v) => setCond(i, { operator: v })} options={OPERATORS} />
+                  {!noSecond && (<><div style={{ height: 6 }} /><Lb>Against this value</Lb><In value={c.second} onChange={(v) => setCond(i, { second: v })} placeholder="e.g. yes" /></>)}
                   {(selected.data.conditions || []).length > 1 && <button onClick={() => updateData(selected.id, { conditions: selected.data.conditions.filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove</button>}
                 </div>); })}
               <button onClick={() => updateData(selected.id, { conditions: [...(selected.data.conditions || []), { first: "{{last_message}}", operator: "contains", second: "" }] })} style={addBtn(NC.condition)}>+ Add Condition</button>
-              <Hn>Use <b style={{ color: D.sub }}>{"{{last_message}}"}</b> for the user's last message, or <b style={{ color: D.sub }}>{"{{answer}}"}</b> for a saved answer. Connect the green (True) and red (False) dots.</Hn></Ed>)}
+              <Hn>Keep <b style={{ color: D.sub }}>{"{{last_message}}"}</b> to test the customer's message, or use <b style={{ color: D.sub }}>{"{{answer}}"}</b> for a saved answer. Then drag the green (True) and red (False) dots to the next steps.</Hn></Ed>)}
 
             {selected.type === "tag" && (<Ed title="🏷️ Update Tag">
               <Lb>Tags to assign</Lb>
