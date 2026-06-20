@@ -758,7 +758,7 @@ function Editor({ flowId, onBack }) {
                   <span style={{ marginLeft: "auto", color: D.faint }}>▾</span>
                 </div>
                 {tagOpen && (
-                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 9, zIndex: 50, overflow: "hidden", boxShadow: "0 12px 30px rgba(0,0,0,.5)" }}>
+                  <div style={{ marginTop: 4, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 9, overflow: "hidden", boxShadow: "0 12px 30px rgba(0,0,0,.5)" }}>
                     <input className="cs-in" autoFocus value={tagSearch} onChange={(e) => setTagSearch(e.target.value)} placeholder="Search or create…" style={{ width: "100%", padding: "8px 10px", borderRadius: 0, border: "none", borderBottom: `1px solid ${D.border}`, fontSize: 12.5, boxSizing: "border-box", fontFamily: T.font }} />
                     <div style={{ maxHeight: 180, overflowY: "auto" }}>
                       {allLabels.filter((l) => l.toLowerCase().includes(tagSearch.toLowerCase())).map((l) => { const on = curTags.includes(l); return (<div key={l} className="cs-row" onClick={() => toggleTag(l)} style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", color: D.text, display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: on ? NC.buttons : D.faint }}>{on ? "✓" : "○"}</span>{l}</div>); })}
