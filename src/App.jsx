@@ -542,17 +542,42 @@ function Editor({ flowId, onBack }) {
   const [tagSearch, setTagSearch] = useState("");
   const [search, setSearch] = useState("");
   const idRef = useRef(1);
+  const rfRef = useRef(null);
+  const wrapperRef = useRef(null);
 
   useEffect(() => {
     (async () => {
-      try { const j = await (await fetch(`${API}/api/flows/${flowId}`)).json(); setName(j.flow.name || ""); setFlowStatus(j.flow.status); const { nodes: n, edges: e } = fromEngineFormat(j.flow.definition || { start: null, nodes: {} }); setNodes(n); setEdges(e); idRef.current = n.length + 5; setStatus("Loaded"); } catch { setStatus("Load failed"); }
+      try { const j = await (await fetch(`${API}/api/flows/${flowId}`)).json(); setName(j.flow.name || ""); setFlowStatus(j.flow.status); const { nodes: n, edges: e } = fromEngineFormat(j.flow.definition || { start: null, nodes: {} }); setNodes(n); setEdges(e); idRef.current = n.reduce((m, x) => Math.max(m, parseInt(String(x.id).replace(/\D/g, ""), 10) || 0), 1); setStatus("Loaded"); } catch { setStatus("Load failed"); }
     })();
   }, [flowId]);
   useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/labels?account_id=${ACCOUNT_ID}`)).json(); setAllLabels(j.labels || []); } catch { setAllLabels([]); } })(); }, []);
 
   const onConnect = useCallback((p) => setEdges((eds) => addEdge({ ...p, type: "deletable", animated: true }, eds)), [setEdges]);
   const onDeleteEdge = useCallback((id) => setEdges((es) => es.filter((e) => e.id !== id)), [setEdges]);
-  const addNode = (kind) => { const id = `n${++idRef.current}`; setNodes((nds) => [...nds, { id, type: kind, position: { x: 360 + Math.random() * 60, y: 200 + nds.length * 40 }, data: defaultData(kind) }]); setSelectedId(id); };
+  const addNode = (kind, pos) => {
+    const id = `n${++idRef.current}`;
+    let position = pos;
+    if (!position) {
+      const k = idRef.current % 6;
+      let base = { x: 440, y: 150 };
+      try { if (rfRef.current && rfRef.current.screenToFlowPosition) base = rfRef.current.screenToFlowPosition({ x: window.innerWidth * 0.52, y: window.innerHeight * 0.40 }); } catch (e) {}
+      position = { x: base.x + k * 46, y: base.y + k * 70 };
+    }
+    setNodes((nds) => [...nds, { id, type: kind, position, data: defaultData(kind) }]);
+    setSelectedId(id);
+  };
+  const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; };
+  const onDrop = (e) => {
+    e.preventDefault();
+    const kind = e.dataTransfer.getData("application/cs-node");
+    if (!kind) return;
+    let position; const inst = rfRef.current;
+    try {
+      if (inst && inst.screenToFlowPosition) position = inst.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      else if (inst && inst.project && wrapperRef.current) { const b = wrapperRef.current.getBoundingClientRect(); position = inst.project({ x: e.clientX - b.left, y: e.clientY - b.top }); }
+    } catch (err) {}
+    addNode(kind, position);
+  };
   const updateData = (id, patch) => setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
   const selected = nodes.find((n) => n.id === selectedId) || null;
   const setHeader = (h) => selected && updateData(selected.id, { header: h });
@@ -599,7 +624,7 @@ function Editor({ flowId, onBack }) {
               <div key={grp.group} style={{ marginBottom: 6 }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: D.faint, margin: "6px 2px 8px", textTransform: "uppercase", letterSpacing: ".08em" }}>{grp.group}</div>
                 {items.map((p) => (
-                  <button key={p.kind} className="cs-pal" onClick={() => addNode(p.kind)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", marginBottom: 7, padding: "10px 11px", border: `1px solid ${D.border}`, borderRadius: 9, background: D.panel2, color: D.text, cursor: "pointer", fontSize: 12.5, fontWeight: 500, fontFamily: T.font, transition: "all .12s" }}>
+                  <button key={p.kind} className="cs-pal" draggable onDragStart={(e) => { e.dataTransfer.setData("application/cs-node", p.kind); e.dataTransfer.effectAllowed = "move"; }} onClick={() => addNode(p.kind)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", marginBottom: 7, padding: "10px 11px", border: `1px solid ${D.border}`, borderRadius: 9, background: D.panel2, color: D.text, cursor: "pointer", fontSize: 12.5, fontWeight: 500, fontFamily: T.font, transition: "all .12s" }}>
                     <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: hexA(p.color, .14), color: p.color, fontSize: 12 }}>{p.icon}</span>
                     {p.label}
                   </button>
@@ -607,12 +632,12 @@ function Editor({ flowId, onBack }) {
               </div>
             );
           })}
-          <div style={{ fontSize: 11, color: D.faint, marginTop: 10, lineHeight: 1.6 }}>Click a node to add it, then connect the dots. Click the <b style={{ color: "#fb7185" }}>✕</b> on a line to remove a connection.</div>
+          <div style={{ fontSize: 11, color: D.faint, marginTop: 10, lineHeight: 1.6 }}>Drag a node onto the canvas (or click to add), then connect the dots. Click the <b style={{ color: "#fb7185" }}>✕</b> on a line to remove a connection.</div>
         </div>
 
-        <div style={{ flex: 1, background: D.bg }}>
+        <div ref={wrapperRef} onDragOver={onDragOver} onDrop={onDrop} style={{ flex: 1, background: D.bg }}>
           <EdgeCtx.Provider value={{ onDeleteEdge }}>
-            <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
+            <ReactFlow nodes={nodes} edges={edges} onInit={(inst) => { rfRef.current = inst; }} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
               <Background color="#1a2230" gap={20} size={1} />
               <Controls />
               <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || ACCENT} maskColor="rgba(7,10,16,.7)" />
