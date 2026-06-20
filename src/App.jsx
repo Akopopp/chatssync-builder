@@ -752,23 +752,16 @@ function Editor({ flowId, onBack }) {
 
             {selected.type === "tag" && (<Ed title="🏷️ Update Tag">
               <Lb>Tags to assign</Lb>
-              <div style={{ position: "relative" }}>
-                <div onClick={() => setTagOpen((o) => !o)} style={{ minHeight: 38, border: `1px solid ${D.border}`, borderRadius: 7, background: D.input, padding: "6px 8px", cursor: "pointer", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                  {curTags.length ? curTags.map((l) => (<span key={l} style={{ padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(NC.tag, .16), color: NC.tag, border: `1px solid ${hexA(NC.tag, .4)}` }}>{l}</span>)) : <span style={{ color: D.faint, fontSize: 12.5 }}>Select tags to assign…</span>}
-                  <span style={{ marginLeft: "auto", color: D.faint }}>▾</span>
-                </div>
-                {tagOpen && (
-                  <div style={{ marginTop: 4, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 9, overflow: "hidden", boxShadow: "0 12px 30px rgba(0,0,0,.5)" }}>
-                    <input className="cs-in" autoFocus value={tagSearch} onChange={(e) => setTagSearch(e.target.value)} placeholder="Search or create…" style={{ width: "100%", padding: "8px 10px", borderRadius: 0, border: "none", borderBottom: `1px solid ${D.border}`, fontSize: 12.5, boxSizing: "border-box", fontFamily: T.font }} />
-                    <div style={{ maxHeight: 180, overflowY: "auto" }}>
-                      {allLabels.filter((l) => l.toLowerCase().includes(tagSearch.toLowerCase())).map((l) => { const on = curTags.includes(l); return (<div key={l} className="cs-row" onClick={() => toggleTag(l)} style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", color: D.text, display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: on ? NC.buttons : D.faint }}>{on ? "✓" : "○"}</span>{l}</div>); })}
-                      {tagSearch.trim() && !allLabels.some((l) => l.toLowerCase() === tagSearch.trim().toLowerCase()) && (<div className="cs-row" onClick={() => { toggleTag(tagSearch.trim()); setTagSearch(""); }} style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", color: NC.tag }}>+ Create "{tagSearch.trim()}"</div>)}
-                      {allLabels.length === 0 && !tagSearch.trim() && <div style={{ padding: "10px 12px", fontSize: 12, color: D.faint }}>No tags yet — type to create one.</div>}
-                    </div>
-                  </div>
-                )}
+              {curTags.length > 0 && (<div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {curTags.map((l) => (<span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 3px 9px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, background: hexA(NC.tag, .16), color: NC.tag, border: `1px solid ${hexA(NC.tag, .4)}` }}>{l}<span onClick={() => toggleTag(l)} style={{ cursor: "pointer", width: 15, height: 15, borderRadius: "50%", display: "grid", placeItems: "center", background: hexA(NC.tag, .25) }}>×</span></span>))}
+              </div>)}
+              <input className="cs-in" value={tagSearch} onChange={(e) => setTagSearch(e.target.value)} placeholder="Search or type a new tag…" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: `1px solid ${D.border}`, background: D.input, fontSize: 12.5, boxSizing: "border-box", fontFamily: T.font, color: D.text }} />
+              <div style={{ marginTop: 6, maxHeight: 170, overflowY: "auto", border: `1px solid ${D.border}`, borderRadius: 8, background: D.panel2 }}>
+                {allLabels.filter((l) => l.toLowerCase().includes(tagSearch.toLowerCase())).map((l) => { const on = curTags.includes(l); return (<div key={l} className="cs-row" onClick={() => toggleTag(l)} style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", color: D.text, display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: on ? NC.tag : D.faint }}>{on ? "✓" : "○"}</span>{l}</div>); })}
+                {tagSearch.trim() && !allLabels.some((l) => l.toLowerCase() === tagSearch.trim().toLowerCase()) && (<div className="cs-row" onClick={() => { toggleTag(tagSearch.trim()); setTagSearch(""); }} style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", color: NC.tag, fontWeight: 600 }}>+ Create "{tagSearch.trim()}"</div>)}
+                {allLabels.length === 0 && !tagSearch.trim() && <div style={{ padding: "10px 12px", fontSize: 12, color: D.faint }}>No tags yet — type above to create one.</div>}
               </div>
-              <Hn>Adds these labels to the conversation in ChatsSync (existing labels stay).</Hn></Ed>)}
+              <Hn>Tap a tag to add or remove it. Added labels go on the conversation in ChatsSync (existing ones stay).</Hn></Ed>)}
 
             {selected.type === "stop" && (<Ed title="🛑 Stop Chatbot / Talk to Human"><Lb>Message (optional)</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /><Hn>Stops the bot and opens the conversation for a human agent.</Hn></Ed>)}
 
