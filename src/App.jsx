@@ -236,7 +236,7 @@ function toEngineFormat(nodes, edges) {
     else if (n.type === "cta") def.nodes[n.id] = { type: "cta", header: hdr(d), body: d.body || "", display: d.display || "", url: d.url || "", footer: d.footer || "", next: plainNext[n.id] || null };
     else if (n.type === "delay") def.nodes[n.id] = { type: "delay", seconds: (d.unit === "minutes" ? (parseInt(d.value, 10) || 0) * 60 : (parseInt(d.value, 10) || 0)), next: plainNext[n.id] || null };
     else if (n.type === "tag") def.nodes[n.id] = { type: "tag", labels: (d.labels || "").split(",").map((x) => x.trim()).filter(Boolean), next: plainNext[n.id] || null };
-    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => ({ label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)) })), submit_message: d.submitMessage || "", next: plainNext[n.id] || null };
+    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => ({ label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)) })), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: plainNext[n.id] || null };
     else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: d.text || "" };
     else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: plainNext[n.id] || null };
     else if (n.type === "condition") def.nodes[n.id] = { type: "condition", match: d.match || "all", conditions: (d.conditions || []).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })), next_true: condTrue[n.id] || null, next_false: condFalse[n.id] || null };
@@ -265,7 +265,7 @@ function fromEngineFormat(def) {
     if (kind === "question") { data.text = node.text || ""; data.saveAs = node.save_as || "answer"; data.responseFormat = node.response_format || "any"; const ts = node.timeout_seconds || 0; if (ts && ts % 60 === 0 && ts >= 60) { data.timeoutValue = ts / 60; data.timeoutUnit = "minutes"; } else { data.timeoutValue = ts; data.timeoutUnit = "seconds"; } data.timeoutMessage = node.timeout_message || ""; data.continueOnTimeout = !!node.continue_on_timeout; }
     if (kind === "condition") { data.match = node.match || "all"; data.conditions = (Array.isArray(node.conditions) && node.conditions.length ? node.conditions : [{ first: node.first || "{{last_message}}", operator: node.operator || "contains", second: node.second || "" }]).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })); }
     if (kind === "tag") data.labels = (node.labels || []).join(", ");
-    if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "" })); data.submitMessage = node.submit_message || ""; }
+    if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "" })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
     if (kind === "buttons") { data.header = node.header || { type: "none", value: "" }; data.text = node.text || ""; data.footer = node.footer || ""; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
@@ -532,6 +532,7 @@ function Editor({ flowId, onBack }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([startNode()]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const reopenGuard = useRef(false);
   const [status, setStatus] = useState("Loading…");
   const [name, setName] = useState("");
   const [flowStatus, setFlowStatus] = useState("draft");
@@ -637,7 +638,7 @@ function Editor({ flowId, onBack }) {
 
         <div ref={wrapperRef} onDragOver={onDragOver} onDrop={onDrop} style={{ flex: 1, background: D.bg }}>
           <EdgeCtx.Provider value={{ onDeleteEdge }}>
-            <ReactFlow nodes={nodes} edges={edges} onInit={(inst) => { rfRef.current = inst; }} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
+            <ReactFlow nodes={nodes} edges={edges} onInit={(inst) => { rfRef.current = inst; }} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { if (reopenGuard.current) return; setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (reopenGuard.current) return; if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
               <Background color="#1a2230" gap={20} size={1} />
               <Controls />
               <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || ACCENT} maskColor="rgba(7,10,16,.7)" />
@@ -649,7 +650,7 @@ function Editor({ flowId, onBack }) {
           <div style={{ width: 304, background: D.panel, borderLeft: `1px solid ${D.border}`, padding: 16, overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: D.faint, textTransform: "uppercase", letterSpacing: ".06em" }}>Edit node</div>
-              <button onClick={() => { setSelectedId(null); setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n))); }} title="Close" style={{ marginLeft: "auto", width: 26, height: 26, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 13 }}>✕</button>
+              <button onClick={() => { reopenGuard.current = true; setSelectedId(null); setNodes((nds) => nds.map((n) => ({ ...n, selected: false }))); setTimeout(() => { reopenGuard.current = false; }, 300); }} title="Close" style={{ marginLeft: "auto", width: 30, height: 30, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 14 }}>✕</button>
             </div>
 
             {selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><KeywordChips value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} /><Tog on={!!selected.data.fuzzy} onClick={() => updateData(selected.id, { fuzzy: !selected.data.fuzzy })} label="Enable fuzzy matching" />{selected.data.fuzzy && (<><Lb>Match sensitivity: {selected.data.sensitivity ?? 80}%</Lb><Slider value={selected.data.sensitivity ?? 80} onChange={(v) => updateData(selected.id, { sensitivity: v })} /><div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: D.faint, marginTop: 2 }}><span>Exact</span><span>Very loose</span></div></>)}<Hn>No keywords = starts on any message. With fuzzy OFF, only an exact match starts the bot. With fuzzy ON, close/partial matches start it, based on the sensitivity.</Hn></Ed>)}
@@ -734,6 +735,8 @@ function Editor({ flowId, onBack }) {
               ))}
               <button onClick={() => updateData(selected.id, { fields: [...(selected.data.fields || []), { label: "", key: "" }] })} style={addBtn(NC.form)}>+ Add Field</button>
               <Lb>Message after submit (optional)</Lb><Ar value={selected.data.submitMessage || ""} onChange={(v) => updateData(selected.id, { submitMessage: v })} placeholder="Shukriya! Hum jald rabta karenge." />
+              <Lb>Google Sheet link (optional — auto-saves every answer)</Lb><In value={selected.data.sheetUrl || ""} onChange={(v) => updateData(selected.id, { sheetUrl: v })} placeholder="https://docs.google.com/spreadsheets/d/..." />
+              <div style={{ fontSize: 10.5, color: D.faint, marginTop: 4, lineHeight: 1.5 }}>Share the sheet with your bot's service email (Editor access). Each submission becomes a new row; columns are created automatically from the field keys.</div>
               <Hn>Tip: keep “Save as” one word (location, phone, naam) so you can reuse it later as {"{{location}}"}.</Hn></Ed>)}
 
             {selected.type === "condition" && (<Ed title="🔀 Condition">
