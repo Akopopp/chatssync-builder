@@ -116,12 +116,12 @@ function ButtonsNode({ data, selected }) {
   const a = NC.buttons; const buttons = data.buttons || [];
   return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🔘" title="Send Buttons" /><HeaderPreview data={data} /><div style={nbody}>{data.text || "…"}</div>
     {buttons.map((b, i) => (<div key={i} style={itemPill}>{b.title || `Button ${i + 1}`}<Handle type="source" position={Position.Right} id={`btn-${i}`} style={rightHandle(a)} /></div>))}
-    <FooterPreview data={data} /><div style={{ height: 8 }} /></div>);
+    <FooterPreview data={data} /><div style={{ height: 8 }} /><Handle type="source" position={Position.Bottom} id="default" style={hStyle(a)} /></div>);
 }
 function ListNode({ data, selected }) {
   const a = NC.list; const rows = [];
   eachListRow(data.sections, (row, gi) => { rows.push(<div key={gi} style={itemPill}><div style={{ fontWeight: 600 }}>{row.title || `Row ${gi + 1}`}</div>{row.description ? <div style={small}>{row.description}</div> : null}<Handle type="source" position={Position.Right} id={`row-${gi}`} style={rightHandle(a)} /></div>); });
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="📋" title="Send List" /><HeaderPreview data={data} /><div style={nbody}>{data.body || "…"}{data.button ? <div style={{ marginTop: 4, fontSize: 11, color: a }}>▾ {data.button}</div> : null}</div>{rows}<FooterPreview data={data} /><div style={{ height: 8 }} /></div>);
+  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="📋" title="Send List" /><HeaderPreview data={data} /><div style={nbody}>{data.body || "…"}{data.button ? <div style={{ marginTop: 4, fontSize: 11, color: a }}>▾ {data.button}</div> : null}</div>{rows}<FooterPreview data={data} /><div style={{ height: 8 }} /><Handle type="source" position={Position.Bottom} id="default" style={hStyle(a)} /></div>);
 }
 function MediaNode({ data, selected }) {
   const a = NC.media;
@@ -240,11 +240,11 @@ function toEngineFormat(nodes, edges) {
     else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: d.text || "" };
     else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: plainNext[n.id] || null };
     else if (n.type === "condition") def.nodes[n.id] = { type: "condition", match: d.match || "all", conditions: (d.conditions || []).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })), next_true: condTrue[n.id] || null, next_false: condFalse[n.id] || null };
-    else if (n.type === "buttons") def.nodes[n.id] = { type: "buttons", header: hdr(d), text: d.text || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, buttons: (d.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null })) };
+    else if (n.type === "buttons") def.nodes[n.id] = { type: "buttons", header: hdr(d), text: d.text || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: plainNext[n.id] || null, buttons: (d.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null })) };
     else if (n.type === "list") {
       const secs = (d.sections || []).map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title || "", description: r.description || "" })) }));
       let gi = 0; secs.forEach((sec) => sec.rows.forEach((r) => { r.next = (rowNext[n.id] || {})[`row-${gi}`] || null; gi++; }));
-      def.nodes[n.id] = { type: "list", header: hdr(d), body: d.body || "", button: d.button || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, sections: secs };
+      def.nodes[n.id] = { type: "list", header: hdr(d), body: d.body || "", button: d.button || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: plainNext[n.id] || null, sections: secs };
     }
   }
   return def;
@@ -270,8 +270,8 @@ function fromEngineFormat(def) {
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
     nodes.push({ id, type: kind, position: (def.layout && def.layout[id]) ? def.layout[id] : { x: 340 + (idx % 2) * 330, y: y + idx * 135 }, data });
-    if (kind === "buttons") (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-b${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); });
-    else if (kind === "list") { let gi = 0; (normSecs || []).forEach((sec) => (sec.rows || []).forEach((r) => { if (r.next) edges.push({ id: `e-${id}-r${gi}`, source: id, sourceHandle: `row-${gi}`, target: r.next, type: "deletable", animated: true }); gi++; })); }
+    if (kind === "buttons") { (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-b${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); }); if (node.next) edges.push({ id: `e-${id}-def`, source: id, sourceHandle: "default", target: node.next, type: "deletable", animated: true }); }
+    else if (kind === "list") { let gi = 0; (normSecs || []).forEach((sec) => (sec.rows || []).forEach((r) => { if (r.next) edges.push({ id: `e-${id}-r${gi}`, source: id, sourceHandle: `row-${gi}`, target: r.next, type: "deletable", animated: true }); gi++; })); if (node.next) edges.push({ id: `e-${id}-def`, source: id, sourceHandle: "default", target: node.next, type: "deletable", animated: true }); }
     else if (kind === "condition") { if (node.next_true) edges.push({ id: `e-${id}-t`, source: id, sourceHandle: "cond-true", target: node.next_true, type: "deletable", animated: true }); if (node.next_false) edges.push({ id: `e-${id}-f`, source: id, sourceHandle: "cond-false", target: node.next_false, type: "deletable", animated: true }); }
     else if (node.next) edges.push({ id: `e-${id}`, source: id, target: node.next, type: "deletable", animated: true });
   });
