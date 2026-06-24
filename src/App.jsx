@@ -224,27 +224,28 @@ function toEngineFormat(nodes, edges) {
     else if (h && h.startsWith("row-")) { (rowNext[e.source] = rowNext[e.source] || {})[h] = e.target; }
     else if (h === "cond-true") condTrue[e.source] = e.target;
     else if (h === "cond-false") condFalse[e.source] = e.target;
-    else plainNext[e.source] = e.target;
+    else (plainNext[e.source] = plainNext[e.source] || []).push(e.target);
   }
-  def.start = plainNext["start"] || null;
+  const nx = (id) => { const arr = plainNext[id]; if (!arr || !arr.length) return null; return arr.length === 1 ? arr[0] : arr; };
+  def.start = (plainNext["start"] || [])[0] || null;
   for (const n of nodes) def.layout[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
   for (const n of nodes) {
     const d = n.data || {};
     if (n.type === "start") { def.trigger = { keywords: (d.keywords || "").split(",").map((x) => x.trim()).filter(Boolean), fuzzy: !!d.fuzzy, sensitivity: parseInt(d.sensitivity, 10) || 80 }; continue; }
-    else if (n.type === "text") def.nodes[n.id] = { type: "text", text: d.text || "", next: plainNext[n.id] || null };
-    else if (n.type === "media") def.nodes[n.id] = { type: "media", url: d.url || "", media_type: d.mediaType || "", name: d.name || "", caption: d.caption || "", next: plainNext[n.id] || null };
-    else if (n.type === "cta") def.nodes[n.id] = { type: "cta", header: hdr(d), body: d.body || "", display: d.display || "", url: d.url || "", footer: d.footer || "", next: plainNext[n.id] || null };
-    else if (n.type === "delay") def.nodes[n.id] = { type: "delay", seconds: (d.unit === "minutes" ? (parseInt(d.value, 10) || 0) * 60 : (parseInt(d.value, 10) || 0)), next: plainNext[n.id] || null };
-    else if (n.type === "tag") def.nodes[n.id] = { type: "tag", labels: (d.labels || "").split(",").map((x) => x.trim()).filter(Boolean), next: plainNext[n.id] || null };
-    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => ({ label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)) })), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: plainNext[n.id] || null };
+    else if (n.type === "text") def.nodes[n.id] = { type: "text", text: d.text || "", next: nx(n.id) };
+    else if (n.type === "media") def.nodes[n.id] = { type: "media", url: d.url || "", media_type: d.mediaType || "", name: d.name || "", caption: d.caption || "", next: nx(n.id) };
+    else if (n.type === "cta") def.nodes[n.id] = { type: "cta", header: hdr(d), body: d.body || "", display: d.display || "", url: d.url || "", footer: d.footer || "", next: nx(n.id) };
+    else if (n.type === "delay") def.nodes[n.id] = { type: "delay", seconds: (d.unit === "minutes" ? (parseInt(d.value, 10) || 0) * 60 : (parseInt(d.value, 10) || 0)), next: nx(n.id) };
+    else if (n.type === "tag") def.nodes[n.id] = { type: "tag", labels: (d.labels || "").split(",").map((x) => x.trim()).filter(Boolean), next: nx(n.id) };
+    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => ({ label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)) })), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: nx(n.id) };
     else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: d.text || "" };
-    else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: plainNext[n.id] || null };
+    else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: nx(n.id) };
     else if (n.type === "condition") def.nodes[n.id] = { type: "condition", match: d.match || "all", conditions: (d.conditions || []).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })), next_true: condTrue[n.id] || null, next_false: condFalse[n.id] || null };
-    else if (n.type === "buttons") def.nodes[n.id] = { type: "buttons", header: hdr(d), text: d.text || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: plainNext[n.id] || null, buttons: (d.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null })) };
+    else if (n.type === "buttons") def.nodes[n.id] = { type: "buttons", header: hdr(d), text: d.text || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: nx(n.id), buttons: (d.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null })) };
     else if (n.type === "list") {
       const secs = (d.sections || []).map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title || "", description: r.description || "" })) }));
       let gi = 0; secs.forEach((sec) => sec.rows.forEach((r) => { r.next = (rowNext[n.id] || {})[`row-${gi}`] || null; gi++; }));
-      def.nodes[n.id] = { type: "list", header: hdr(d), body: d.body || "", button: d.button || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: plainNext[n.id] || null, sections: secs };
+      def.nodes[n.id] = { type: "list", header: hdr(d), body: d.body || "", button: d.button || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: nx(n.id), sections: secs };
     }
   }
   return def;
@@ -254,6 +255,7 @@ function fromEngineFormat(def) {
   if (def && def.trigger) start.data = { keywords: (def.trigger.keywords || []).join(", "), fuzzy: !!def.trigger.fuzzy, sensitivity: def.trigger.sensitivity || 80 };
   if (def && def.layout && def.layout.start) start.position = def.layout.start;
   const nodes = [start]; const edges = []; const y = 200;
+  const pushNext = (srcId, nextVal, handle) => { const arr = Array.isArray(nextVal) ? nextVal : (nextVal ? [nextVal] : []); arr.forEach((t, k) => { if (!t) return; const e = { id: `e-${srcId}-${handle || "n"}${k}`, source: srcId, target: t, type: "deletable", animated: true }; if (handle) e.sourceHandle = handle; edges.push(e); }); };
   const ids = Object.keys((def && def.nodes) || {});
   ids.forEach((id, idx) => {
     const node = def.nodes[id]; const kind = node.type === "handover" ? "stop" : node.type; const data = {};
@@ -270,10 +272,10 @@ function fromEngineFormat(def) {
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
     nodes.push({ id, type: kind, position: (def.layout && def.layout[id]) ? def.layout[id] : { x: 340 + (idx % 2) * 330, y: y + idx * 135 }, data });
-    if (kind === "buttons") { (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-b${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); }); if (node.next) edges.push({ id: `e-${id}-def`, source: id, sourceHandle: "default", target: node.next, type: "deletable", animated: true }); }
-    else if (kind === "list") { let gi = 0; (normSecs || []).forEach((sec) => (sec.rows || []).forEach((r) => { if (r.next) edges.push({ id: `e-${id}-r${gi}`, source: id, sourceHandle: `row-${gi}`, target: r.next, type: "deletable", animated: true }); gi++; })); if (node.next) edges.push({ id: `e-${id}-def`, source: id, sourceHandle: "default", target: node.next, type: "deletable", animated: true }); }
+    if (kind === "buttons") { (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-b${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); }); pushNext(id, node.next, "default"); }
+    else if (kind === "list") { let gi = 0; (normSecs || []).forEach((sec) => (sec.rows || []).forEach((r) => { if (r.next) edges.push({ id: `e-${id}-r${gi}`, source: id, sourceHandle: `row-${gi}`, target: r.next, type: "deletable", animated: true }); gi++; })); pushNext(id, node.next, "default"); }
     else if (kind === "condition") { if (node.next_true) edges.push({ id: `e-${id}-t`, source: id, sourceHandle: "cond-true", target: node.next_true, type: "deletable", animated: true }); if (node.next_false) edges.push({ id: `e-${id}-f`, source: id, sourceHandle: "cond-false", target: node.next_false, type: "deletable", animated: true }); }
-    else if (node.next) edges.push({ id: `e-${id}`, source: id, target: node.next, type: "deletable", animated: true });
+    else pushNext(id, node.next);
   });
   if (def && def.start) edges.push({ id: "e-start", source: "start", target: def.start, type: "deletable", animated: true });
   return { nodes, edges };
