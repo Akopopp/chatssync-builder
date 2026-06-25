@@ -282,11 +282,13 @@ function fromEngineFormat(def) {
 }
 
 export default function App() {
-  const initialView = params.get("view") === "gallery" ? "gallery" : "dashboard";
+  const qv = params.get("view");
+  const initialView = qv === "gallery" ? "gallery" : qv === "templates" ? "templates" : "dashboard";
   const [view, setView] = useState(initialView);
   const [editId, setEditId] = useState(null);
   useEffect(() => { injectFont(); injectStyles(); }, []);
   if (view === "gallery") return <Gallery />;
+  if (view === "templates") return <Templates />;
   if (view === "editor") return <Editor flowId={editId} onBack={() => setView("dashboard")} />;
   return <Dashboard onEdit={(id) => { setEditId(id); setView("editor"); }} />;
 }
@@ -818,3 +820,412 @@ function KeywordChips({ value, onChange }) {
 }
 function Slider({ value, onChange }) { return (<input type="range" min={50} max={100} step={5} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: NC.start, cursor: "pointer" }} />); }
 function Tog({ on, onClick, label }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: "10px 0 2px" }}><div style={{ width: 34, height: 20, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} /></div><span style={{ fontSize: 12.5, color: D.text }}>{label}</span></div>); }
+// ===================== WHATSAPP TEMPLATES (DARK) =====================
+// Self-contained like Gallery. Lists templates live from Meta (via bot engine) and
+// lets the client build + submit a new template. Theme matches Gallery/Editor (dark `D`).
+const TPL_LANGS = [
+  ["en", "English"], ["en_US", "English (US)"], ["en_GB", "English (UK)"], ["ur", "Urdu"], ["hi", "Hindi"],
+  ["ar", "Arabic"], ["es", "Spanish"], ["es_ES", "Spanish (Spain)"], ["pt_BR", "Portuguese (BR)"], ["fr", "French"],
+  ["de", "German"], ["it", "Italian"], ["id", "Indonesian"], ["ms", "Malay"], ["tr", "Turkish"], ["ru", "Russian"],
+  ["nl", "Dutch"], ["zh_CN", "Chinese (Simplified)"], ["bn", "Bengali"], ["pa", "Punjabi"], ["ta", "Tamil"], ["fa", "Persian"],
+];
+const TPL_CATS = [["MARKETING", "Marketing"], ["UTILITY", "Utility"], ["AUTHENTICATION", "Authentication"]];
+const TPL_TYPES = [["none", "Text"], ["image", "Image"], ["video", "Video"], ["document", "Document"]];
+
+function tplStatusColor(st) {
+  const s = String(st || "").toUpperCase();
+  if (s === "APPROVED") return { c: "#3BD17F", bg: "rgba(46,166,107,.16)", b: "rgba(46,166,107,.4)" };
+  if (s === "REJECTED" || s === "DISABLED" || s === "PAUSED") return { c: "#fb7185", bg: "rgba(229,82,74,.14)", b: "rgba(229,82,74,.4)" };
+  return { c: "#E0A53B", bg: "rgba(217,165,59,.16)", b: "rgba(217,165,59,.4)" }; // PENDING / IN_APPEAL / etc
+}
+// pull header/body/footer/buttons out of Meta's components array (for list preview)
+function tplParts(t) {
+  const comps = t.components || []; const out = { header: null, body: "", footer: "", buttons: [] };
+  for (const c of comps) {
+    const type = (c.type || "").toUpperCase();
+    if (type === "HEADER") out.header = { format: c.format, text: c.text || "" };
+    else if (type === "BODY") out.body = c.text || "";
+    else if (type === "FOOTER") out.footer = c.text || "";
+    else if (type === "BUTTONS") out.buttons = c.buttons || [];
+  }
+  return out;
+}
+
+function Templates() {
+  const [list, setList] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [busyName, setBusyName] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(null);
+  const [editFrom, setEditFrom] = useState(null); // pre-fill the form when duplicating
+
+  const load = async () => {
+    setErr("");
+    try {
+      const r = await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}`);
+      const j = await r.json();
+      if (j.ok) setList(j.templates || []);
+      else { setList([]); setErr(j.error || "Couldn't load templates."); }
+    } catch { setList([]); setErr("Couldn't reach the server. Is the bot engine running?"); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const doDelete = async () => {
+    const t = confirmDel; setConfirmDel(null); if (!t) return;
+    setBusyName(t.name); setMsg("");
+    try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&name=${encodeURIComponent(t.name)}`, { method: "DELETE" })).json(); if (!j.ok) setErr(j.error || "Delete failed."); await load(); }
+    catch { setErr("Delete failed."); }
+    setBusyName(null);
+  };
+
+  if (creating) return <TemplateCreate prefill={editFrom} onClose={() => { setCreating(false); setEditFrom(null); }} onDone={() => { setCreating(false); setEditFrom(null); setMsg("Template submitted to WhatsApp for review."); load(); }} />;
+
+  const primary = { display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 16px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font };
+  const ghost = { display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 14px", background: D.panel2, color: D.text, border: `1px solid ${D.border}`, borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: T.font };
+
+  return (
+    <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: D.panel, borderBottom: `1px solid ${D.border}`, padding: "16px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: D.text }}>WhatsApp Templates</div>
+          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>Create and manage your WhatsApp message templates</div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+          <button style={ghost} onClick={load}>↻ Refresh</button>
+          <button className="cs-pub" style={primary} onClick={() => setCreating(true)}>＋ Create Template</button>
+        </div>
+      </div>
+
+      {msg && <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: hexA(NC.buttons, .12), border: `1px solid ${hexA(NC.buttons, .4)}`, color: "#86efac", borderRadius: 8, fontSize: 13 }}>{msg}</div>}
+      {err && <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: hexA(NC.stop, .12), border: `1px solid ${hexA(NC.stop, .4)}`, color: "#fda4af", borderRadius: 8, fontSize: 13 }}>{err}</div>}
+
+      <div style={{ padding: 24 }}>
+        {list === null && <div style={{ color: D.sub, fontSize: 14, padding: 20 }}>Loading…</div>}
+        {list && list.length === 0 && !err && (
+          <div style={{ border: `1px dashed ${D.border}`, borderRadius: 14, padding: "48px 24px", textAlign: "center", color: D.sub, background: D.panel2 }}>
+            <div style={{ fontSize: 34, marginBottom: 10 }}>📄</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: D.text, marginBottom: 4 }}>No templates yet</div>
+            <div style={{ fontSize: 13 }}>Click "Create Template" to submit your first one to WhatsApp.</div>
+          </div>
+        )}
+        {list && list.length > 0 && (
+          <div style={{ border: `1px solid ${D.border}`, borderRadius: 12, overflow: "visible" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.1fr 1fr 1.1fr 1fr 0.6fr", padding: "12px 16px", background: D.panel2, fontSize: 12, fontWeight: 600, color: D.sub, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: "12px 12px 0 0" }}>
+              <div>Name</div><div>Category</div><div>Language</div><div>Status</div><div>Type</div><div style={{ textAlign: "right" }}>Actions</div>
+            </div>
+            {list.map((t, idx) => {
+              const sc = tplStatusColor(t.status); const parts = tplParts(t);
+              const hdrType = parts.header ? (parts.header.format || "TEXT") : "TEXT";
+              return (
+                <div key={t.id || t.name + idx} style={{ display: "grid", gridTemplateColumns: "2fr 1.1fr 1fr 1.1fr 1fr 0.6fr", alignItems: "center", padding: "13px 16px", borderTop: `1px solid ${D.border}`, fontSize: 13 }}>
+                  <div style={{ fontWeight: 600, color: D.text, wordBreak: "break-word" }}>{t.name}</div>
+                  <div style={{ color: D.sub }}>{(t.category || "").charAt(0) + (t.category || "").slice(1).toLowerCase()}</div>
+                  <div style={{ color: D.sub }}>{t.language}</div>
+                  <div><span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: sc.bg, color: sc.c, border: `1px solid ${sc.b}` }}>{(t.status || "PENDING").charAt(0) + (t.status || "PENDING").slice(1).toLowerCase()}</span></div>
+                  <div style={{ color: D.sub, textTransform: "capitalize" }}>{hdrType.toLowerCase() === "text" ? "Text" : hdrType.charAt(0) + hdrType.slice(1).toLowerCase()}</div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+                    <button onClick={() => setPreview(t)} title="Preview" style={{ width: 32, height: 32, border: `1px solid ${D.border}`, borderRadius: 8, background: D.panel2, cursor: "pointer", fontSize: 14, color: D.sub }}>👁</button>
+                    <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenuOpen(menuOpen && menuOpen.name === t.name ? null : { name: t.name, x: r.right, y: r.bottom }); }} style={{ width: 32, height: 32, border: `1px solid ${D.border}`, borderRadius: 8, background: D.panel2, cursor: "pointer", fontSize: 18, lineHeight: "14px", color: D.sub }}>⋮</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {menuOpen && (() => {
+        const t = (list || []).find((x) => x.name === menuOpen.name); if (!t) return null;
+        const items = [
+          ["👁 Preview", () => { setMenuOpen(null); setPreview(t); }],
+          ["📋 Duplicate", () => { setMenuOpen(null); setEditFrom(t); setCreating(true); }],
+          ["↻ Refresh status", () => { setMenuOpen(null); load(); }],
+          ["🗑 Delete", () => { setMenuOpen(null); setConfirmDel(t); }],
+        ];
+        return (<>
+          <div onClick={() => setMenuOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
+          <div style={{ position: "fixed", top: menuOpen.y + 6, left: menuOpen.x - 170, width: 170, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,.5)", zIndex: 100, overflow: "hidden" }}>
+            {items.map(([lbl, fn]) => (<div key={lbl} onClick={fn} style={{ padding: "10px 14px", fontSize: 13, cursor: "pointer", color: lbl.includes("Delete") ? "#fb7185" : D.text, borderTop: lbl.includes("Delete") ? `1px solid ${D.border}` : "none" }} onMouseEnter={(e) => (e.currentTarget.style.background = D.card)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>{lbl}</div>))}
+          </div>
+        </>);
+      })()}
+
+      {confirmDel && (
+        <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, padding: 22, width: 380, maxWidth: "100%", fontFamily: T.font }}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: D.text, marginBottom: 8 }}>Delete template?</div>
+            <div style={{ fontSize: 13, color: D.sub, marginBottom: 18, lineHeight: 1.5 }}>"{confirmDel.name}" will be permanently deleted from WhatsApp (all languages). This can't be undone.</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setConfirmDel(null)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: `1px solid ${D.border}`, background: D.panel2, color: D.text }}>Cancel</button>
+              <button onClick={doDelete} style={{ padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, border: "none", background: "#dc2626", color: "#fff" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <div onClick={() => setPreview(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 210, padding: 24 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 380, maxWidth: "100%", background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", fontFamily: T.font }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: `1px solid ${D.border}` }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: D.text }}>{preview.name}</div>
+              <button onClick={() => setPreview(null)} style={{ marginLeft: "auto", border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13, fontFamily: T.font }}>✕</button>
+            </div>
+            <div style={{ padding: 20, background: "#0a1014" }}>
+              <WaBubble parts={tplParts(preview)} />
+            </div>
+            {preview.status && String(preview.status).toUpperCase() === "REJECTED" && preview.rejected_reason && (
+              <div style={{ padding: "10px 18px", fontSize: 12, color: "#fda4af", borderTop: `1px solid ${D.border}` }}>Rejected: {preview.rejected_reason}</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A WhatsApp-style green message bubble used in preview + the create form.
+function WaBubble({ parts }) {
+  const p = parts || {};
+  return (
+    <div style={{ background: "#005c4b", borderRadius: 10, padding: "8px 9px 6px", color: "#e9edef", maxWidth: 320, marginLeft: "auto", boxShadow: "0 1px 1px rgba(0,0,0,.3)" }}>
+      {p.header && p.header.format && p.header.format !== "TEXT" && (
+        <div style={{ height: 120, borderRadius: 6, background: "#0b3b31", display: "grid", placeItems: "center", marginBottom: 6, color: "#7fd4c1", fontSize: 28 }}>
+          {p.header.format === "IMAGE" ? "🖼️" : p.header.format === "VIDEO" ? "🎬" : "📄"}
+        </div>
+      )}
+      {p.header && (p.header.format === "TEXT" || !p.header.format) && p.header.text ? <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>{p.header.text}</div> : null}
+      <div style={{ fontSize: 13.5, whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{(p.body || "Your message body will appear here.").replace(/\{\{(\d+)\}\}/g, "[$1]")}</div>
+      {p.footer ? <div style={{ fontSize: 11, color: "#9fc4ba", marginTop: 5 }}>{p.footer}</div> : null}
+      <div style={{ textAlign: "right", fontSize: 10, color: "#9fc4ba", marginTop: 3 }}>12:00 ✓✓</div>
+      {(p.buttons || []).length > 0 && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+          {p.buttons.map((b, i) => { const isUrl = (b.type || "").toUpperCase() === "URL"; const isPhone = (b.type || "").toUpperCase() === "PHONE_NUMBER"; return (
+            <div key={i} style={{ background: "#0a1014", borderRadius: 7, padding: "8px 0", textAlign: "center", color: "#53bdeb", fontSize: 13, fontWeight: 500 }}>
+              {isUrl ? "🔗 " : isPhone ? "📞 " : "↩ "}{b.text || "Button"}
+            </div>
+          ); })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== CREATE TEMPLATE FORM =====================
+function TemplateCreate({ onClose, onDone, prefill }) {
+  const pf = prefill ? tplParts(prefill) : null;
+  const pfHdrType = pf && pf.header ? (pf.header.format || "TEXT").toLowerCase() : "none";
+  const [language, setLanguage] = useState(prefill?.language || "en");
+  const [category, setCategory] = useState(prefill?.category || "MARKETING");
+  const [name, setName] = useState(prefill ? (prefill.name + "_copy") : "");
+  const [headerType, setHeaderType] = useState(pfHdrType === "text" || pfHdrType === "none" ? (pf?.header?.text ? "text" : "none") : pfHdrType);
+  const [headerText, setHeaderText] = useState(pf?.header?.format === "TEXT" ? (pf.header.text || "") : "");
+  const [headerHandle, setHeaderHandle] = useState("");
+  const [headerFileName, setHeaderFileName] = useState("");
+  const [body, setBody] = useState(pf?.body || "");
+  const [footer, setFooter] = useState(pf?.footer || "");
+  const [btnMode, setBtnMode] = useState(() => { const b = pf?.buttons || []; if (!b.length) return "none"; const hasQr = b.some((x) => (x.type || "").toUpperCase() === "QUICK_REPLY"); const hasCta = b.some((x) => ["URL", "PHONE_NUMBER"].includes((x.type || "").toUpperCase())); return hasQr && hasCta ? "all" : hasQr ? "quick_reply" : "cta"; });
+  const [buttons, setButtons] = useState(() => (pf?.buttons || []).map((b) => ({ type: (b.type || "QUICK_REPLY").toUpperCase(), text: b.text || "", url: b.url || "", phone_number: b.phone_number || "" })));
+  // auth-only
+  const [authSecurity, setAuthSecurity] = useState(true);
+  const [authExpiry, setAuthExpiry] = useState("");
+  const [authButtonText, setAuthButtonText] = useState("Copy Code");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef(null);
+  const [uploadingHdr, setUploadingHdr] = useState(false);
+
+  const isAuth = category === "AUTHENTICATION";
+  const bodyVarCount = (body.match(/\{\{(\d+)\}\}/g) || []).length;
+
+  const addVariable = () => { const next = bodyVarCount + 1; setBody((b) => b + `{{${next}}}`); };
+
+  const qrCount = buttons.filter((b) => b.type === "QUICK_REPLY").length;
+  const urlCount = buttons.filter((b) => b.type === "URL").length;
+  const phoneCount = buttons.filter((b) => b.type === "PHONE_NUMBER").length;
+
+  const addBtnRow = (type) => {
+    if (type === "QUICK_REPLY" && qrCount >= 10) return;
+    if (type === "URL" && urlCount >= 2) return;
+    if (type === "PHONE_NUMBER" && phoneCount >= 1) return;
+    setButtons((b) => [...b, { type, text: "", url: "", phone_number: "" }]);
+  };
+  const setBtn = (i, patch) => setButtons((b) => b.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const delBtn = (i) => setButtons((b) => b.filter((_, j) => j !== i));
+
+  // change button mode -> reset to the right starting buttons
+  const changeMode = (m) => {
+    setBtnMode(m);
+    if (m === "none") setButtons([]);
+    else if (m === "quick_reply") setButtons([{ type: "QUICK_REPLY", text: "" }]);
+    else if (m === "cta") setButtons([{ type: "URL", text: "", url: "" }]);
+    else if (m === "all") setButtons([{ type: "QUICK_REPLY", text: "" }, { type: "URL", text: "", url: "" }]);
+  };
+
+  const onHeaderFile = async (e) => {
+    const file = e.target.files?.[0]; e.target.value = ""; if (!file) return;
+    setUploadingHdr(true); setError("");
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("account_id", String(ACCOUNT_ID));
+      const j = await (await fetch(`${API}/api/templates/upload-media`, { method: "POST", body: fd })).json();
+      if (j.ok && j.handle) { setHeaderHandle(j.handle); setHeaderFileName(file.name); }
+      else setError(j.error || "Media upload failed. Text headers work without setup.");
+    } catch { setError("Media upload failed."); }
+    setUploadingHdr(false);
+  };
+
+  const submit = async () => {
+    setError("");
+    if (!name.trim()) return setError("Template name is required.");
+    if (!isAuth && !body.trim()) return setError("Body text is required.");
+    if (!isAuth && headerType !== "none" && headerType !== "text" && !headerHandle) return setError("Please upload a sample " + headerType + " for the header (or change Header Type to None/Text).");
+    // validate buttons
+    for (const b of buttons) {
+      if (!b.text.trim()) return setError("Every button needs a label.");
+      if (b.type === "URL" && !b.url.trim()) return setError("URL buttons need a link.");
+      if (b.type === "PHONE_NUMBER" && !b.phone_number.trim()) return setError("Phone buttons need a number.");
+    }
+    setSubmitting(true);
+    const payload = {
+      account_id: ACCOUNT_ID, name: name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
+      language, category,
+    };
+    if (isAuth) {
+      payload.add_security_recommendation = authSecurity;
+      if (authExpiry) payload.code_expiration_minutes = parseInt(authExpiry, 10);
+      payload.button_text = authButtonText || "Copy Code";
+    } else {
+      payload.header_type = headerType;
+      if (headerType === "text") payload.header_text = headerText;
+      if (["image", "video", "document"].includes(headerType)) payload.header_handle = headerHandle;
+      payload.body_text = body;
+      payload.footer_text = footer;
+      payload.buttons = buttons;
+      // build example arrays for {{n}} placeholders so Meta accepts variables
+      if (bodyVarCount > 0) payload.body_example = Array.from({ length: bodyVarCount }, (_, i) => "sample" + (i + 1));
+    }
+    try {
+      const j = await (await fetch(`${API}/api/templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })).json();
+      if (j.ok) onDone();
+      else setError(j.error || "Submission failed. Please review the fields.");
+    } catch { setError("Submission failed. Could not reach the server."); }
+    setSubmitting(false);
+  };
+
+  // live preview parts
+  const previewParts = {
+    header: headerType === "text" ? (headerText ? { format: "TEXT", text: headerText } : null) : (headerType !== "none" ? { format: headerType.toUpperCase(), text: "" } : null),
+    body, footer, buttons,
+  };
+
+  const pill = (active, color) => ({ flex: 1, padding: "11px 8px", borderRadius: 9, textAlign: "center", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: T.font, border: `1px solid ${active ? color : D.border}`, background: active ? hexA(color, .16) : D.panel2, color: active ? color : D.sub, transition: "all .12s" });
+
+  return (
+    <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: D.panel, borderBottom: `1px solid ${D.border}`, padding: "14px 24px", display: "flex", alignItems: "center", gap: 12 }}>
+        <button onClick={onClose} style={{ padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: `1px solid ${D.border}`, background: D.panel2, color: D.text }}>← Back</button>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>Create Template</div>
+        <button className="cs-pub" onClick={submit} disabled={submitting} style={{ marginLeft: "auto", padding: "8px 18px", borderRadius: 8, cursor: submitting ? "default" : "pointer", fontSize: 13, fontFamily: T.font, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700, opacity: submitting ? .7 : 1 }}>{submitting ? "Submitting…" : "Submit Template"}</button>
+      </div>
+
+      {error && <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: hexA(NC.stop, .12), border: `1px solid ${hexA(NC.stop, .4)}`, color: "#fda4af", borderRadius: 8, fontSize: 13 }}>{error}</div>}
+
+      <div style={{ display: "flex", gap: 24, padding: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {/* ---- form column ---- */}
+        <div style={{ flex: "1 1 520px", minWidth: 320, maxWidth: 640 }}>
+          <Lb>Template Language</Lb>
+          <Sel value={language} onChange={setLanguage} options={TPL_LANGS} />
+
+          <Lb>Template Category</Lb>
+          <div style={{ display: "flex", gap: 8 }}>
+            {TPL_CATS.map(([v, l]) => (<div key={v} onClick={() => setCategory(v)} style={pill(category === v, v === "MARKETING" ? NC.cta : v === "UTILITY" ? NC.buttons : NC.list)}>{l}</div>))}
+          </div>
+          <Hn>Meta may re-categorize your template. Utility = order/account updates, Marketing = promotions, Authentication = OTP codes.</Hn>
+
+          <Lb>Template Name</Lb>
+          <In value={name} onChange={(v) => setName(v.toLowerCase().replace(/[^a-z0-9_]/g, "_"))} placeholder="order_confirmation" />
+          <Hn>Lowercase letters, numbers and underscores only.</Hn>
+
+          {isAuth ? (
+            <div style={{ marginTop: 8, padding: 14, border: `1px solid ${D.border}`, borderRadius: 10, background: D.panel2 }}>
+              <div style={{ fontSize: 13, color: D.sub, marginBottom: 10, lineHeight: 1.5 }}>Authentication templates send a one-time code. The body and code button are generated by WhatsApp automatically.</div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: D.text, marginBottom: 8 }}><input type="checkbox" checked={authSecurity} onChange={(e) => setAuthSecurity(e.target.checked)} style={{ width: 16, height: 16, accentColor: NC.buttons }} />Add security recommendation</label>
+              <Lb>Code expiry (minutes, optional)</Lb>
+              <In value={authExpiry} onChange={(v) => setAuthExpiry(v.replace(/[^0-9]/g, ""))} placeholder="e.g. 10" />
+              <Lb>Button text</Lb>
+              <In value={authButtonText} onChange={setAuthButtonText} placeholder="Copy Code" maxLength={25} />
+            </div>
+          ) : (
+            <>
+              <Lb>Template Type</Lb>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {TPL_TYPES.map(([v, l]) => (<div key={v} onClick={() => { setHeaderType(v); if (v === "text") { setHeaderHandle(""); setHeaderFileName(""); } }} style={{ ...pill(headerType === v || (v === "none" && headerType === "text"), NC.media), minWidth: 90, flex: "0 0 auto", padding: "9px 14px" }}>{l}</div>))}
+              </div>
+              <Hn>Text = no media. Image/Video/Document add a media header (a sample file is required for approval).</Hn>
+
+              {(headerType === "image" || headerType === "video" || headerType === "document") && (
+                <div style={{ marginTop: 8 }}>
+                  <input ref={fileRef} type="file" accept={headerType === "image" ? "image/*" : headerType === "video" ? "video/mp4" : "application/pdf"} onChange={onHeaderFile} style={{ display: "none" }} />
+                  <button onClick={() => fileRef.current?.click()} style={addBtn(NC.media)}>{uploadingHdr ? "Uploading…" : (headerFileName ? "✓ " + headerFileName + " (change)" : "📁 Upload sample " + headerType)}</button>
+                </div>
+              )}
+
+              <Lb>Header Text (optional)</Lb>
+              <In value={headerType === "text" ? headerText : ""} onChange={(v) => { setHeaderText(v); if (v) setHeaderType("text"); }} placeholder="Up to 60 characters" maxLength={60} />
+              <Hn>A short bold title at the top. Leave empty for no text header. (Only one header type per template — choosing a media type above uses that instead.)</Hn>
+
+              <Lb>Template Body</Lb>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <button onClick={addVariable} style={{ fontSize: 12, color: NC.cta, background: "transparent", border: `1px solid ${hexA(NC.cta, .4)}`, borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontFamily: T.font }}>+ Add Variable</button>
+                <span style={{ fontSize: 11, color: D.faint }}>{body.length}/1024</span>
+              </div>
+              <textarea className="cs-in" value={body} onChange={(e) => setBody(e.target.value.slice(0, 1024))} rows={5} placeholder="Hello {{1}}, your order {{2}} has shipped!" style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} />
+              <Hn>Use {"{{1}}"}, {"{{2}}"} for variables that get filled per-contact when you send a campaign.</Hn>
+
+              <Lb>Footer (optional)</Lb>
+              <In value={footer} onChange={(v) => setFooter(v.slice(0, 60))} placeholder="Up to 60 characters" maxLength={60} />
+
+              <Lb>Buttons (optional)</Lb>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[["none", "None"], ["quick_reply", "Quick Replies"], ["cta", "Call to Action"], ["all", "All"]].map(([v, l]) => (<div key={v} onClick={() => changeMode(v)} style={{ ...pill(btnMode === v, NC.question), minWidth: 100, flex: "0 0 auto", padding: "9px 14px" }}>{l}</div>))}
+              </div>
+
+              {btnMode !== "none" && (
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {buttons.map((b, i) => (
+                    <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, background: D.panel2 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: NC.question, textTransform: "uppercase", letterSpacing: ".04em" }}>{b.type === "QUICK_REPLY" ? "Quick Reply" : b.type === "URL" ? "URL Button" : "Phone Button"}</span>
+                        <button onClick={() => delBtn(i)} style={{ ...delMini, marginLeft: "auto" }}>✕</button>
+                      </div>
+                      <In value={b.text} onChange={(v) => setBtn(i, { text: v.slice(0, 25) })} placeholder="Button text (max 25)" maxLength={25} />
+                      {b.type === "URL" && (<><div style={{ height: 6 }} /><In value={b.url} onChange={(v) => setBtn(i, { url: v })} placeholder="https://example.com" /></>)}
+                      {b.type === "PHONE_NUMBER" && (<><div style={{ height: 6 }} /><In value={b.phone_number} onChange={(v) => setBtn(i, { phone_number: v })} placeholder="+923001234567" /></>)}
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {(btnMode === "quick_reply" || btnMode === "all") && qrCount < 10 && <button onClick={() => addBtnRow("QUICK_REPLY")} style={{ ...addBtn(NC.question), width: "auto", flex: "1 1 auto", marginTop: 0 }}>+ Quick Reply ({qrCount}/10)</button>}
+                    {(btnMode === "cta" || btnMode === "all") && urlCount < 2 && <button onClick={() => addBtnRow("URL")} style={{ ...addBtn(NC.cta), width: "auto", flex: "1 1 auto", marginTop: 0 }}>+ URL ({urlCount}/2)</button>}
+                    {(btnMode === "cta" || btnMode === "all") && phoneCount < 1 && <button onClick={() => addBtnRow("PHONE_NUMBER")} style={{ ...addBtn(NC.buttons), width: "auto", flex: "1 1 auto", marginTop: 0 }}>+ Phone ({phoneCount}/1)</button>}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ---- preview column ---- */}
+        <div style={{ flex: "0 0 360px", maxWidth: 360, position: "sticky", top: 88 }}>
+          <Lb>Preview</Lb>
+          <div style={{ padding: 16, background: "#0a1014", border: `1px solid ${D.border}`, borderRadius: 12 }}>
+            <WaBubble parts={isAuth ? { body: "{{1}} is your verification code.", footer: authSecurity ? "For your security, do not share this code." : "", buttons: [{ type: "QUICK_REPLY", text: authButtonText || "Copy Code" }] } : previewParts} />
+          </div>
+          <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>This is an approximation. The real message may look slightly different on the customer's phone.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ===================== END WHATSAPP TEMPLATES =====================
