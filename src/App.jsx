@@ -822,51 +822,43 @@ function KeywordChips({ value, onChange }) {
 function Slider({ value, onChange }) { return (<input type="range" min={50} max={100} step={5} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: NC.start, cursor: "pointer" }} />); }
 function Tog({ on, onClick, label }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: "10px 0 2px" }}><div style={{ width: 34, height: 20, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} /></div><span style={{ fontSize: 12.5, color: D.text }}>{label}</span></div>); }
 // ════════════════════════════════════════════════════════════════════════════
-//  WHATSAPP TEMPLATES — premium builder (sharp UI, rich editor, carousel, preview)
-//  Self-contained: only uses theme tokens (T/D/NC/ACCENT) + hexA + helpers already
-//  defined at the top of App.jsx. Replaces the old Templates/WaBubble/TemplateCreate.
+//  WHATSAPP TEMPLATES — full module (number dashboard → list → builder)
+//  Sharp modern UI. Uses only theme tokens (T/D/NC/ACCENT) + hexA already defined
+//  at the top of App.jsx. Self-contained; helper atoms are uniquely named.
 // ════════════════════════════════════════════════════════════════════════════
 
 const TPL_CATS = [
-  ["MARKETING", "Marketing", "Promos, offers & announcements", "📣"],
-  ["UTILITY", "Utility", "Order, account & service updates", "🧾"],
+  ["MARKETING", "Marketing", "Promos, offers & news", "📣"],
+  ["UTILITY", "Utility", "Order & account updates", "🧾"],
   ["AUTHENTICATION", "Authentication", "One-time passcodes", "🔐"],
 ];
-const TPL_HEADER_TYPES = [
-  ["none", "None", "—"], ["text", "Text", "🗛"], ["image", "Image", "🖼️"],
-  ["video", "Video", "🎬"], ["document", "Document", "📄"],
-];
+const TPL_HDRS = [["none", "None", "⊘"], ["text", "Text", "T"], ["image", "Image", "🖼️"], ["video", "Video", "🎬"], ["document", "Document", "📄"]];
 const TPL_LANGS2 = [
   ["en", "English"], ["en_US", "English (US)"], ["en_GB", "English (UK)"], ["ur", "Urdu"], ["hi", "Hindi"],
-  ["ar", "Arabic"], ["bn", "Bengali"], ["pa", "Punjabi"], ["es", "Spanish"], ["es_ES", "Spanish (Spain)"],
-  ["es_MX", "Spanish (Mexico)"], ["pt_BR", "Portuguese (BR)"], ["pt_PT", "Portuguese (PT)"], ["fr", "French"],
-  ["de", "German"], ["it", "Italian"], ["nl", "Dutch"], ["ru", "Russian"], ["tr", "Turkish"], ["id", "Indonesian"],
-  ["ms", "Malay"], ["fil", "Filipino"], ["th", "Thai"], ["vi", "Vietnamese"], ["zh_CN", "Chinese (CN)"],
-  ["zh_HK", "Chinese (HK)"], ["zh_TW", "Chinese (TW)"], ["ja", "Japanese"], ["ko", "Korean"], ["fa", "Persian"],
-  ["ps", "Pashto"], ["af", "Afrikaans"], ["sq", "Albanian"], ["az", "Azerbaijani"], ["bg", "Bulgarian"],
-  ["ca", "Catalan"], ["hr", "Croatian"], ["cs", "Czech"], ["da", "Danish"], ["nl_BE", "Dutch (BE)"],
-  ["et", "Estonian"], ["fi", "Finnish"], ["el", "Greek"], ["gu", "Gujarati"], ["ha", "Hausa"], ["he", "Hebrew"],
-  ["hu", "Hungarian"], ["kn", "Kannada"], ["kk", "Kazakh"], ["ko_KR", "Korean (KR)"], ["lo", "Lao"],
-  ["lv", "Latvian"], ["lt", "Lithuanian"], ["mk", "Macedonian"], ["ml", "Malayalam"], ["mr", "Marathi"],
-  ["nb", "Norwegian"], ["pl", "Polish"], ["ro", "Romanian"], ["sr", "Serbian"], ["sk", "Slovak"],
-  ["sl", "Slovenian"], ["sw", "Swahili"], ["sv", "Swedish"], ["ta", "Tamil"], ["te", "Telugu"], ["uk", "Ukrainian"],
+  ["ar", "Arabic"], ["bn", "Bengali"], ["pa", "Punjabi"], ["es", "Spanish"], ["es_MX", "Spanish (MX)"],
+  ["pt_BR", "Portuguese (BR)"], ["fr", "French"], ["de", "German"], ["it", "Italian"], ["nl", "Dutch"],
+  ["ru", "Russian"], ["tr", "Turkish"], ["id", "Indonesian"], ["ms", "Malay"], ["fil", "Filipino"],
+  ["th", "Thai"], ["vi", "Vietnamese"], ["zh_CN", "Chinese (CN)"], ["ja", "Japanese"], ["ko", "Korean"],
+  ["fa", "Persian"], ["ps", "Pashto"], ["af", "Afrikaans"], ["ar_EG", "Arabic (EG)"], ["el", "Greek"],
+  ["gu", "Gujarati"], ["he", "Hebrew"], ["kn", "Kannada"], ["ml", "Malayalam"], ["mr", "Marathi"],
+  ["pl", "Polish"], ["ro", "Romanian"], ["sv", "Swedish"], ["ta", "Tamil"], ["te", "Telugu"], ["uk", "Ukrainian"],
 ];
 
-function tplStatusMeta(status) {
-  const s = String(status || "").toUpperCase();
-  if (s === "APPROVED") return { dot: "#34d399", bg: "rgba(52,211,153,.13)", color: "#34d399", label: "Approved" };
-  if (["PENDING", "IN_APPEAL", "PENDING_DELETION"].includes(s)) return { dot: "#fbbf24", bg: "rgba(251,191,36,.13)", color: "#fbbf24", label: s === "PENDING" ? "In review" : s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ") };
-  if (["REJECTED", "DISABLED", "PAUSED"].includes(s)) return { dot: "#fb7185", bg: "rgba(251,113,133,.12)", color: "#fb7185", label: s.charAt(0) + s.slice(1).toLowerCase() };
-  return { dot: D.faint, bg: "rgba(124,134,150,.12)", color: D.sub, label: s ? s.charAt(0) + s.slice(1).toLowerCase() : "Draft" };
+function tStatus(s) {
+  const x = String(s || "").toUpperCase();
+  if (x === "APPROVED") return { dot: "#34d399", bg: "rgba(52,211,153,.12)", fg: "#34d399", label: "Approved" };
+  if (["PENDING", "IN_APPEAL", "PENDING_DELETION"].includes(x)) return { dot: "#fbbf24", bg: "rgba(251,191,36,.12)", fg: "#fbbf24", label: x === "PENDING" ? "In review" : "Pending" };
+  if (["REJECTED", "DISABLED", "PAUSED"].includes(x)) return { dot: "#fb7185", bg: "rgba(251,113,133,.12)", fg: "#fb7185", label: x.charAt(0) + x.slice(1).toLowerCase() };
+  return { dot: D.faint, bg: "rgba(124,134,150,.1)", fg: D.sub, label: x ? x.charAt(0) + x.slice(1).toLowerCase() : "Draft" };
 }
-function tplCatMeta(cat) {
-  const c = String(cat || "").toUpperCase();
-  if (c === "MARKETING") return { color: NC.cta, label: "Marketing" };
-  if (c === "UTILITY") return { color: NC.buttons, label: "Utility" };
-  if (c === "AUTHENTICATION") return { color: NC.list, label: "Authentication" };
-  return { color: D.sub, label: c || "—" };
+function tCat(c) {
+  const x = String(c || "").toUpperCase();
+  if (x === "MARKETING") return { c: NC.cta, label: "Marketing" };
+  if (x === "UTILITY") return { c: NC.buttons, label: "Utility" };
+  if (x === "AUTHENTICATION") return { c: NC.list, label: "Authentication" };
+  return { c: D.sub, label: x || "—" };
 }
-function parseTplComponents(components) {
+function tParse(components) {
   let header = null, body = "", footer = "", buttons = [], cards = [];
   for (const c of (components || [])) {
     const t = (c.type || "").toUpperCase();
@@ -878,23 +870,86 @@ function parseTplComponents(components) {
   }
   return { header, body, footer, buttons, cards };
 }
-function countVars(text) { const m = String(text || "").match(/\{\{\s*\d+\s*\}\}/g); if (!m) return 0; return Math.max(0, ...m.map((x) => parseInt(x.replace(/\D/g, ""), 10))); }
-// WhatsApp markdown -> HTML for the live preview (*bold*, _italic_, ~strike~, ```mono```)
-function waMarkdownToHtml(text) {
+function tVars(text) { const m = String(text || "").match(/\{\{\s*\d+\s*\}\}/g); if (!m) return 0; return Math.max(0, ...m.map((x) => parseInt(x.replace(/\D/g, ""), 10))); }
+function tMd(text) {
   let s = String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  s = s.replace(/\*(.+?)\*/g, "<b>$1</b>").replace(/_(.+?)_/g, "<i>$1</i>").replace(/~(.+?)~/g, "<s>$1</s>").replace(/```(.+?)```/g, "<code>$1</code>");
-  s = s.replace(/\n/g, "<br/>");
+  s = s.replace(/\*(.+?)\*/g, "<b>$1</b>").replace(/_(.+?)_/g, "<i>$1</i>").replace(/~(.+?)~/g, "<s>$1</s>").replace(/```(.+?)```/g, "<code>$1</code>").replace(/\n/g, "<br/>");
   return s;
 }
-function fillVars(text, examples) { return String(text || "").replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => { const v = (examples || [])[parseInt(n, 10) - 1]; return v ? v : "{{" + n + "}}"; }); }
+function tFill(text, ex) { return String(text || "").replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => { const v = (ex || [])[parseInt(n, 10) - 1]; return v || "{{" + n + "}}"; }); }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  LIST PAGE
+//  ROOT: number dashboard → templates list for the chosen number
 // ─────────────────────────────────────────────────────────────────────────────
 function Templates() {
-  const [list, setList] = useState(null);
+  const [inboxes, setInboxes] = useState(null);   // [{id,name,channel_type}]
+  const [picked, setPicked] = useState(null);      // chosen inbox object
   const [err, setErr] = useState("");
-  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const j = await (await fetch(`${API}/api/inboxes?account_id=${ACCOUNT_ID}`)).json();
+        const wa = (j.inboxes || []).filter((i) => (i.channel_type || "").includes("Whatsapp") || (i.channel_type || "").includes("WhatsApp"));
+        const final = wa.length ? wa : (j.inboxes || []);
+        setInboxes(final);
+        if (final.length === 1) setPicked(final[0]);  // single number -> skip the picker
+      } catch { setInboxes([]); setErr("Couldn't load your WhatsApp numbers. Is the bot engine running?"); }
+    })();
+  }, []);
+
+  if (picked) return <TemplatesList inbox={picked} onBack={inboxes && inboxes.length > 1 ? () => setPicked(null) : null} />;
+
+  // ── number-select dashboard ──
+  return (
+    <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
+      <TopBar title="Message Templates" subtitle="Choose a WhatsApp number to manage its templates" icon="📨" />
+      <div style={{ maxWidth: 980, margin: "0 auto", padding: "26px 24px 50px" }}>
+        {err && <Bnr kind="err">{err}</Bnr>}
+        {inboxes === null && <div style={{ color: D.sub, fontSize: 14, padding: 30, textAlign: "center" }}>Loading numbers…</div>}
+        {inboxes && inboxes.length === 0 && (
+          <Empty icon="📞" title="No WhatsApp numbers found" sub="Connect a WhatsApp Cloud number in ChatsSync first, then come back to create templates." />
+        )}
+        {inboxes && inboxes.length > 0 && (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: D.faint, marginBottom: 13 }}>Your numbers ({inboxes.length})</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px,1fr))", gap: 14 }}>
+              {inboxes.map((ib) => <NumberCard key={ib.id} inbox={ib} onClick={() => setPicked(ib)} />)}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NumberCard({ inbox, onClick }) {
+  const [meta, setMeta] = useState(null);
+  useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (j.ok) setMeta(j); } catch {} })(); }, [inbox.id]);
+  return (
+    <div onClick={onClick} className="cs-tcard" style={{ cursor: "pointer", background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, padding: 16, transition: "transform .14s, border-color .14s, box-shadow .14s" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 46, height: 46, borderRadius: 12, background: `linear-gradient(135deg, ${hexA(NC.buttons,.9)}, ${hexA("#13a884",.9)})`, display: "grid", placeItems: "center", fontSize: 22, flexShrink: 0, boxShadow: `0 5px 16px ${hexA(NC.buttons,.3)}` }}>💬</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inbox.name}</div>
+          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>{meta?.phone || "WhatsApp Cloud"}</div>
+        </div>
+        <div style={{ fontSize: 18, color: D.faint }}>→</div>
+      </div>
+      <div style={{ marginTop: 13, paddingTop: 13, borderTop: `1px solid ${D.border}`, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: meta ? "#34d399" : D.faint, display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: meta ? "#34d399" : D.faint }} />{meta ? "Connected" : "Checking…"}</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: ACCENT, fontWeight: 600 }}>Manage templates</span>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TEMPLATES LIST (per number)
+// ─────────────────────────────────────────────────────────────────────────────
+function TemplatesList({ inbox, onBack }) {
+  const [list, setList] = useState(null);
+  const [err, setErr] = useState(""); const [msg, setMsg] = useState("");
   const [creating, setCreating] = useState(false);
   const [editFrom, setEditFrom] = useState(null);
   const [viewTpl, setViewTpl] = useState(null);
@@ -902,104 +957,80 @@ function Templates() {
   const [menuFor, setMenuFor] = useState(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("all");
-  const [waba, setWaba] = useState(null);
+  const IID = inbox.id;
 
   const load = async () => {
     setErr("");
-    try { const r = await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}`); const j = await r.json(); if (j.ok) setList(j.templates || []); else { setList([]); setErr(j.error || "Couldn't load templates."); } }
-    catch { setList([]); setErr("Couldn't reach the server. Is the bot engine running?"); }
+    try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${IID}`)).json(); if (j.ok) setList(j.templates || []); else { setList([]); setErr(j.error || "Couldn't load templates."); } }
+    catch { setList([]); setErr("Couldn't reach the server."); }
   };
-  useEffect(() => { load(); (async () => { try { const j = await (await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}`)).json(); if (j.ok) setWaba(j); } catch {} })(); }, []);
+  useEffect(() => { load(); }, [IID]);
 
-  const doDelete = async () => { const t = confirmDel; setConfirmDel(null); if (!t) return; try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&name=${encodeURIComponent(t.name)}`, { method: "DELETE" })).json(); if (j.ok) { setMsg(`Deleted "${t.name}".`); load(); } else setErr(j.error || "Delete failed."); } catch { setErr("Delete failed."); } };
-  const duplicate = (t) => { setMenuFor(null); const p = parseTplComponents(t.components); setEditFrom({ name: t.name + "_copy", language: t.language, category: t.category, header: p.header, body: p.body, footer: p.footer, buttons: p.buttons, cards: p.cards }); setCreating(true); };
+  const doDelete = async () => { const t = confirmDel; setConfirmDel(null); if (!t) return; try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${IID}&name=${encodeURIComponent(t.name)}`, { method: "DELETE" })).json(); if (j.ok) { setMsg(`Deleted "${t.name}".`); load(); } else setErr(j.error || "Delete failed."); } catch { setErr("Delete failed."); } };
+  const dup = (t) => { setMenuFor(null); const p = tParse(t.components); setEditFrom({ name: t.name + "_copy", language: t.language, category: t.category, header: p.header, body: p.body, footer: p.footer, buttons: p.buttons, cards: p.cards }); setCreating(true); };
 
-  if (creating) return <TemplateCreate prefill={editFrom} waba={waba} onClose={() => { setCreating(false); setEditFrom(null); }} onDone={() => { setCreating(false); setEditFrom(null); setMsg("Template submitted to WhatsApp for review."); load(); }} />;
+  if (creating) return <Builder inbox={inbox} prefill={editFrom} onClose={() => { setCreating(false); setEditFrom(null); }} onDone={() => { setCreating(false); setEditFrom(null); setMsg("Submitted to WhatsApp for review."); load(); }} />;
 
   const q = search.trim().toLowerCase();
   const counts = { all: (list || []).length, APPROVED: 0, PENDING: 0, REJECTED: 0 };
   (list || []).forEach((t) => { const s = String(t.status || "").toUpperCase(); if (s === "APPROVED") counts.APPROVED++; else if (["REJECTED", "DISABLED", "PAUSED"].includes(s)) counts.REJECTED++; else counts.PENDING++; });
   const tabs = [["all", "All"], ["APPROVED", "Approved"], ["PENDING", "In review"], ["REJECTED", "Rejected"]];
-  const filtered = (list || []).filter((t) => {
-    if (q && !(`${t.name} ${t.category} ${t.language}`.toLowerCase().includes(q))) return false;
-    if (tab !== "all") { const s = String(t.status || "").toUpperCase(); if (tab === "REJECTED") { if (!["REJECTED", "DISABLED", "PAUSED"].includes(s)) return false; } else if (tab === "PENDING") { if (["APPROVED", "REJECTED", "DISABLED", "PAUSED"].includes(s)) return false; } else if (s !== tab) return false; }
+  const rows = (list || []).filter((t) => {
+    if (q && !`${t.name} ${t.category} ${t.language}`.toLowerCase().includes(q)) return false;
+    if (tab !== "all") { const s = String(t.status || "").toUpperCase(); if (tab === "REJECTED") return ["REJECTED", "DISABLED", "PAUSED"].includes(s); if (tab === "PENDING") return !["APPROVED", "REJECTED", "DISABLED", "PAUSED"].includes(s); return s === tab; }
     return true;
   });
 
   return (
     <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
-      {/* sharp gradient header */}
-      <div style={{ borderBottom: `1px solid ${D.border}`, background: `linear-gradient(180deg, ${D.panel2} 0%, ${D.panel} 100%)` }}>
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "20px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          <div style={{ width: 42, height: 42, borderRadius: 11, background: `linear-gradient(135deg, ${hexA(NC.buttons, .9)}, ${hexA("#13a884", .9)})`, display: "grid", placeItems: "center", fontSize: 21, boxShadow: `0 6px 18px ${hexA(NC.buttons, .35)}` }}>📨</div>
-          <div>
-            <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-.01em" }}>Message Templates</div>
-            <div style={{ fontSize: 12.5, color: D.sub, marginTop: 1 }}>Design, preview &amp; submit WhatsApp templates{waba?.phone ? ` · ${waba.phone}` : ""}</div>
-          </div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-            <button onClick={load} title="Refresh" style={btnIcon()}>↻</button>
-            <button className="cs-pub" onClick={() => { setMsg(""); setErr(""); setEditFrom(null); setCreating(true); }} style={btnGreen()}>
-              <span style={{ fontSize: 16, lineHeight: 0, marginRight: 2 }}>＋</span> New Template
-            </button>
-          </div>
-        </div>
-        {/* segmented tabs */}
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 24px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {tabs.map(([k, l]) => { const on = tab === k; const n = counts[k] ?? 0; return (
-            <button key={k} onClick={() => setTab(k)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${on ? hexA(ACCENT, .55) : D.border}`, background: on ? hexA(ACCENT, .14) : "transparent", color: on ? "#bdd4ff" : D.sub, transition: "all .12s" }}>
-              {l}<span style={{ fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, background: on ? hexA(ACCENT, .25) : D.panel2, color: on ? "#dbe7ff" : D.faint }}>{n}</span>
-            </button>); })}
-          <input className="cs-in" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, category…" style={{ marginLeft: "auto", padding: "8px 13px", borderRadius: 9, fontSize: 13, fontFamily: T.font, minWidth: 240 }} />
-        </div>
+      <TopBar title={inbox.name} subtitle="WhatsApp message templates" icon="📨" onBack={onBack}
+        right={<button className="cs-pub" onClick={() => { setMsg(""); setErr(""); setEditFrom(null); setCreating(true); }} style={btnGo()}><span style={{ fontSize: 16, marginRight: 3 }}>＋</span> New Template</button>}
+        extra={<button onClick={load} title="Refresh" style={btnSq()}>↻</button>} />
+
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 24px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {tabs.map(([k, l]) => { const on = tab === k; return (
+          <button key={k} onClick={() => setTab(k)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${on ? hexA(ACCENT, .55) : D.border}`, background: on ? hexA(ACCENT, .14) : "transparent", color: on ? "#bdd4ff" : D.sub }}>
+            {l}<span style={{ fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, background: on ? hexA(ACCENT, .25) : D.panel2, color: on ? "#dbe7ff" : D.faint }}>{counts[k] ?? 0}</span>
+          </button>); })}
+        <input className="cs-in" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search templates…" style={{ marginLeft: "auto", padding: "8px 13px", borderRadius: 9, fontSize: 13, fontFamily: T.font, minWidth: 230 }} />
       </div>
 
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "20px 24px 40px" }}>
-        {msg && <Banner kind="ok" onX={() => setMsg("")}>{msg}</Banner>}
-        {err && <Banner kind="err" onX={() => setErr("")}>{err}</Banner>}
-
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "8px 24px 44px" }}>
+        {msg && <Bnr kind="ok" onX={() => setMsg("")}>{msg}</Bnr>}
+        {err && <Bnr kind="err" onX={() => setErr("")}>{err}</Bnr>}
         {list === null && <div style={{ color: D.sub, fontSize: 14, padding: 30, textAlign: "center" }}>Loading templates…</div>}
+        {list && rows.length === 0 && <Empty icon="📋" title={list.length === 0 ? "No templates yet" : "Nothing matches"} sub={list.length === 0 ? "Create your first template and send it for approval." : "Try a different search or filter."} action={list.length === 0 ? <button className="cs-pub" onClick={() => setCreating(true)} style={btnGo()}><span style={{ fontSize: 16, marginRight: 3 }}>＋</span> New Template</button> : null} />}
 
-        {list && filtered.length === 0 && (
-          <div style={{ border: `1px dashed ${D.border}`, borderRadius: 16, padding: "60px 24px", textAlign: "center", background: `radial-gradient(120% 100% at 50% 0%, ${hexA(NC.buttons, .05)}, transparent)` }}>
-            <div style={{ width: 60, height: 60, margin: "0 auto 16px", borderRadius: 16, background: D.panel2, border: `1px solid ${D.border}`, display: "grid", placeItems: "center", fontSize: 28 }}>📋</div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 5 }}>{list.length === 0 ? "No templates yet" : "Nothing matches"}</div>
-            <div style={{ fontSize: 13, color: D.sub, marginBottom: list.length === 0 ? 20 : 0 }}>{list.length === 0 ? "Create your first WhatsApp template and send it for approval." : "Try a different search or filter."}</div>
-            {list.length === 0 && <button className="cs-pub" onClick={() => setCreating(true)} style={{ ...btnGreen(), display: "inline-flex" }}><span style={{ fontSize: 16, marginRight: 2 }}>＋</span> New Template</button>}
-          </div>
-        )}
-
-        {list && filtered.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 16 }}>
-            {filtered.map((t, i) => { const st = tplStatusMeta(t.status); const cat = tplCatMeta(t.category); const p = parseTplComponents(t.components); const hasCarousel = p.cards.length > 0;
+        {list && rows.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px,1fr))", gap: 16 }}>
+            {rows.map((t, i) => { const st = tStatus(t.status); const ct = tCat(t.category); const p = tParse(t.components); const car = p.cards.length;
               return (
                 <div key={t.id || t.name + i} className="cs-tcard" style={{ position: "relative", background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", transition: "transform .14s, border-color .14s, box-shadow .14s" }}>
-                  <div style={{ height: 3, background: cat.color, opacity: .9 }} />
+                  <div style={{ height: 3, background: ct.c, opacity: .9 }} />
                   <div style={{ padding: "14px 16px 0", display: "flex", alignItems: "flex-start", gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 700, color: D.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 5, flexWrap: "wrap" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.color }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span>
-                        <span style={{ padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(cat.color, .14), color: cat.color, border: `1px solid ${hexA(cat.color, .3)}` }}>{cat.label}</span>
-                        <span style={{ fontSize: 11, color: D.faint, fontWeight: 600, textTransform: "uppercase" }}>{t.language}</span>
+                      <div style={{ fontSize: 14.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.fg }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span>
+                        <span style={{ padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(ct.c, .14), color: ct.c, border: `1px solid ${hexA(ct.c, .3)}` }}>{ct.label}</span>
+                        <span style={{ fontSize: 11, color: D.faint, fontWeight: 700, textTransform: "uppercase" }}>{t.language}</span>
                       </div>
                     </div>
                     <button onClick={() => setMenuFor(menuFor === (t.id || t.name) ? null : (t.id || t.name))} style={{ width: 30, height: 30, flexShrink: 0, border: `1px solid ${D.border}`, borderRadius: 8, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 16, lineHeight: "12px" }}>⋯</button>
                   </div>
-                  {/* mini message preview */}
-                  <div onClick={() => setViewTpl(t)} style={{ margin: "12px 16px 14px", padding: "11px 13px", background: D.input, border: `1px solid ${D.border}`, borderRadius: 10, cursor: "pointer", minHeight: 60 }}>
-                    {p.header?.format && p.header.format !== "text" && <div style={{ fontSize: 11, color: D.faint, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>{p.header.format === "image" ? "🖼️" : p.header.format === "video" ? "🎬" : "📄"} {p.header.format} header</div>}
-                    {p.header?.format === "text" && p.header.text && <div style={{ fontSize: 12.5, fontWeight: 700, color: D.text, marginBottom: 4 }}>{p.header.text}</div>}
-                    <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }} dangerouslySetInnerHTML={{ __html: waMarkdownToHtml(p.body) || "<span style='color:" + D.faint + "'>No body</span>" }} />
-                    {(p.buttons.length > 0 || hasCarousel) && <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {hasCarousel && <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: hexA(NC.list, .16), color: NC.list }}>🎠 {p.cards.length} cards</span>}
+                  <div onClick={() => setViewTpl(t)} style={{ margin: "12px 16px 14px", padding: "11px 13px", background: D.input, border: `1px solid ${D.border}`, borderRadius: 10, cursor: "pointer", minHeight: 58 }}>
+                    {p.header?.format && p.header.format !== "text" && <div style={{ fontSize: 11, color: D.faint, marginBottom: 5, display: "flex", alignItems: "center", gap: 5 }}>{p.header.format === "image" ? "🖼️" : p.header.format === "video" ? "🎬" : "📄"} {p.header.format}</div>}
+                    {p.header?.format === "text" && p.header.text && <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{p.header.text}</div>}
+                    <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }} dangerouslySetInnerHTML={{ __html: tMd(p.body) || `<span style='color:${D.faint}'>No body</span>` }} />
+                    {(p.buttons.length || car) > 0 && <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {car > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: hexA(NC.list, .16), color: NC.list }}>🎠 {car} cards</span>}
                       {p.buttons.slice(0, 3).map((b, k) => <span key={k} style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: hexA(ACCENT, .12), color: "#9ec1ff" }}>{b.type === "URL" ? "🔗" : b.type === "PHONE_NUMBER" ? "📞" : "↩"} {b.text}</span>)}
                     </div>}
                   </div>
-
                   {menuFor === (t.id || t.name) && (<>
                     <div onClick={() => setMenuFor(null)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                    <div style={{ position: "absolute", top: 48, right: 14, width: 168, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 11, boxShadow: "0 14px 34px rgba(0,0,0,.55)", zIndex: 50, overflow: "hidden", padding: 5 }}>
-                      {[["👁  Preview", () => { setMenuFor(null); setViewTpl(t); }], ["⧉  Duplicate", () => duplicate(t)], ["↻  Refresh status", () => { setMenuFor(null); load(); }]].map(([l, fn]) => <div key={l} className="cs-row" onClick={fn} style={{ padding: "9px 11px", fontSize: 12.5, cursor: "pointer", color: D.text, borderRadius: 7 }}>{l}</div>)}
+                    <div style={{ position: "absolute", top: 48, right: 14, width: 168, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 11, boxShadow: "0 14px 34px rgba(0,0,0,.55)", zIndex: 50, padding: 5 }}>
+                      {[["👁  Preview", () => { setMenuFor(null); setViewTpl(t); }], ["⧉  Duplicate", () => dup(t)], ["↻  Refresh", () => { setMenuFor(null); load(); }]].map(([l, fn]) => <div key={l} className="cs-row" onClick={fn} style={{ padding: "9px 11px", fontSize: 12.5, cursor: "pointer", color: D.text, borderRadius: 7 }}>{l}</div>)}
                       <div style={{ height: 1, background: D.border, margin: "5px 0" }} />
                       <div className="cs-row" onClick={() => { setMenuFor(null); setConfirmDel(t); }} style={{ padding: "9px 11px", fontSize: 12.5, cursor: "pointer", color: "#fb7185", borderRadius: 7 }}>🗑  Delete</div>
                     </div>
@@ -1010,108 +1041,76 @@ function Templates() {
         )}
       </div>
 
-      {viewTpl && <TemplatePreviewModal tpl={viewTpl} onClose={() => setViewTpl(null)} onDuplicate={() => { setViewTpl(null); duplicate(viewTpl); }} onDelete={() => { setViewTpl(null); setConfirmDel(viewTpl); }} />}
-
+      {viewTpl && <PreviewModal tpl={viewTpl} onClose={() => setViewTpl(null)} onDup={() => { setViewTpl(null); dup(viewTpl); }} onDel={() => { setViewTpl(null); setConfirmDel(viewTpl); }} />}
       {confirmDel && (
-        <Modal onClose={() => setConfirmDel(null)} width={400}>
+        <Mdl onClose={() => setConfirmDel(null)} w={400}>
           <div style={{ fontWeight: 700, fontSize: 16.5, marginBottom: 8 }}>Delete "{confirmDel.name}"?</div>
-          <div style={{ fontSize: 13, color: D.sub, marginBottom: 20, lineHeight: 1.5 }}>This removes the template from WhatsApp across all languages. It can't be undone.</div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-            <button onClick={() => setConfirmDel(null)} style={btnGhost()}>Cancel</button>
-            <button onClick={doDelete} style={{ ...btnGreen(), background: "#dc2626", boxShadow: "none" }}>Delete</button>
-          </div>
-        </Modal>
+          <div style={{ fontSize: 13, color: D.sub, marginBottom: 20, lineHeight: 1.5 }}>Removes the template from WhatsApp across all languages. Can't be undone.</div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button onClick={() => setConfirmDel(null)} style={btnGh()}>Cancel</button><button onClick={doDelete} style={{ ...btnGo(), background: "#dc2626", boxShadow: "none" }}>Delete</button></div>
+        </Mdl>
       )}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PREVIEW MODAL (read-only, full message render)
+//  PREVIEW MODAL
 // ─────────────────────────────────────────────────────────────────────────────
-function TemplatePreviewModal({ tpl, onClose, onDuplicate, onDelete }) {
-  const p = parseTplComponents(tpl.components); const st = tplStatusMeta(tpl.status); const cat = tplCatMeta(tpl.category);
+function PreviewModal({ tpl, onClose, onDup, onDel }) {
+  const p = tParse(tpl.components); const st = tStatus(tpl.status); const ct = tCat(tpl.category);
   return (
-    <Modal onClose={onClose} width={440}>
+    <Mdl onClose={onClose} w={440}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 700, wordBreak: "break-word" }}>{tpl.name}</div>
           <div style={{ display: "flex", gap: 8, marginTop: 7, flexWrap: "wrap" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.color }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span>
-            <span style={{ padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(cat.color, .14), color: cat.color }}>{cat.label}</span>
-            <span style={{ fontSize: 11, color: D.faint, fontWeight: 600, textTransform: "uppercase", alignSelf: "center" }}>{tpl.language}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.fg }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span>
+            <span style={{ padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(ct.c, .14), color: ct.c }}>{ct.label}</span>
+            <span style={{ fontSize: 11, color: D.faint, fontWeight: 700, textTransform: "uppercase", alignSelf: "center" }}>{tpl.language}</span>
           </div>
         </div>
-        <button onClick={onClose} style={{ ...btnIcon(), width: 32, height: 32 }}>✕</button>
+        <button onClick={onClose} style={{ ...btnSq(), width: 32, height: 32 }}>✕</button>
       </div>
       {tpl.rejected_reason && String(tpl.status).toUpperCase() === "REJECTED" && <div style={{ marginBottom: 14, padding: "9px 12px", borderRadius: 9, background: hexA(NC.stop, .1), border: `1px solid ${hexA(NC.stop, .3)}`, color: "#fda4af", fontSize: 12.5 }}>Rejected: {String(tpl.rejected_reason).replace(/_/g, " ").toLowerCase()}</div>}
-      <WaPhone parts={p} />
-      <div style={{ display: "flex", gap: 10, marginTop: 18, justifyContent: "flex-end" }}>
-        <button onClick={onDelete} style={{ ...btnGhost(), color: "#fb7185", borderColor: hexA(NC.stop, .4) }}>Delete</button>
-        <button onClick={onDuplicate} style={btnGreen()}>⧉ Duplicate &amp; edit</button>
-      </div>
-    </Modal>
+      <Phone parts={p} />
+      <div style={{ display: "flex", gap: 10, marginTop: 18, justifyContent: "flex-end" }}><button onClick={onDel} style={{ ...btnGh(), color: "#fb7185", borderColor: hexA(NC.stop, .4) }}>Delete</button><button onClick={onDup} style={btnGo()}>⧉ Duplicate &amp; edit</button></div>
+    </Mdl>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  WHATSAPP PHONE PREVIEW (sharp, realistic chat bubble)
+//  WHATSAPP PHONE PREVIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function WaPhone({ parts, examples }) {
+function Phone({ parts, ex }) {
   const { header, body, footer, buttons = [], cards = [] } = parts || {};
-  const bodyHtml = waMarkdownToHtml(fillVars(body, examples));
+  const html = tMd(tFill(body, ex));
+  const inlineBtns = buttons.filter((b) => b.type === "URL" || b.type === "PHONE_NUMBER" || b.type === "COPY_CODE");
+  const qrBtns = buttons.filter((b) => b.type === "QUICK_REPLY");
   return (
-    <div style={{ borderRadius: 18, padding: 14, background: "linear-gradient(160deg,#0b141a,#111b21)", border: `1px solid ${D.border}`, boxShadow: "inset 0 1px 0 rgba(255,255,255,.03)" }}>
-      {/* WA chat wallpaper texture */}
+    <div style={{ borderRadius: 18, padding: 14, background: "linear-gradient(160deg,#0b141a,#111b21)", border: `1px solid ${D.border}` }}>
       <div style={{ borderRadius: 12, padding: "16px 12px", background: "repeating-linear-gradient(135deg, rgba(255,255,255,.012) 0 2px, transparent 2px 22px), #0b141a", minHeight: 80 }}>
-        <div style={{ maxWidth: 300, marginLeft: 0 }}>
-          <div style={{ position: "relative", background: "#1f2c33", borderRadius: "0 8px 8px 8px", padding: 0, overflow: "hidden", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
-            {/* media header */}
+        <div style={{ maxWidth: 300 }}>
+          <div style={{ background: "#1f2c33", borderRadius: "0 8px 8px 8px", overflow: "hidden", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
             {header?.format && ["image", "video", "document"].includes(header.format) && (
               <div style={{ height: header.format === "document" ? 56 : 150, background: "linear-gradient(135deg,#10202a,#15303a)", display: "grid", placeItems: "center", color: "#5b7682", fontSize: header.format === "document" ? 22 : 34, position: "relative" }}>
-                {header.previewUrl && header.format === "image" ? <img src={header.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : header.previewUrl && header.format === "video" ? <video src={header.previewUrl} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (header.format === "image" ? "🖼️" : header.format === "video" ? "🎬" : "📄")}
+                {header.url && header.format === "image" ? <img src={header.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : header.url && header.format === "video" ? <video src={header.url} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (header.format === "image" ? "🖼️" : header.format === "video" ? "🎬" : "📄")}
                 {header.format === "video" && <div style={{ position: "absolute", width: 44, height: 44, borderRadius: "50%", background: "rgba(0,0,0,.55)", display: "grid", placeItems: "center", color: "#fff", fontSize: 18 }}>▶</div>}
               </div>
             )}
             <div style={{ padding: "7px 9px 8px" }}>
-              {header?.format === "text" && header.text && <div style={{ fontSize: 14.5, fontWeight: 700, color: "#e9edef", marginBottom: 3, lineHeight: 1.3 }}>{fillVars(header.text, examples)}</div>}
-              <div style={{ fontSize: 14, color: "#e9edef", lineHeight: 1.42, whiteSpace: "pre-wrap", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: bodyHtml || "<span style='color:#6b7c85'>Your message text…</span>" }} />
+              {header?.format === "text" && header.text && <div style={{ fontSize: 14.5, fontWeight: 700, color: "#e9edef", marginBottom: 3, lineHeight: 1.3 }}>{tFill(header.text, ex)}</div>}
+              <div style={{ fontSize: 14, color: "#e9edef", lineHeight: 1.42, whiteSpace: "pre-wrap", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: html || "<span style='color:#6b7c85'>Your message text…</span>" }} />
               {footer && <div style={{ fontSize: 12, color: "#8696a0", marginTop: 5 }}>{footer}</div>}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 3 }}><span style={{ fontSize: 10.5, color: "#8696a0" }}>11:30</span><span style={{ fontSize: 12, color: "#53bdeb" }}>✓✓</span></div>
             </div>
-            {/* inline buttons (quick replies render below as separate pills in WA, but show attached for clarity) */}
-            {buttons.length > 0 && buttons.some((b) => b.type === "URL" || b.type === "PHONE_NUMBER" || b.type === "COPY_CODE") && (
-              <div style={{ borderTop: "1px solid #2a3942" }}>
-                {buttons.filter((b) => b.type === "URL" || b.type === "PHONE_NUMBER" || b.type === "COPY_CODE").map((b, i) => (
-                  <div key={i} style={{ padding: "9px 0", textAlign: "center", color: "#53bdeb", fontSize: 14, fontWeight: 500, borderTop: i === 0 ? "none" : "1px solid #2a3942", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                    {b.type === "URL" ? "🔗" : b.type === "PHONE_NUMBER" ? "📞" : "⧉"} {b.text || (b.type === "COPY_CODE" ? "Copy code" : "Button")}
-                  </div>
-                ))}
-              </div>
-            )}
+            {inlineBtns.length > 0 && <div style={{ borderTop: "1px solid #2a3942" }}>{inlineBtns.map((b, i) => <div key={i} style={{ padding: "9px 0", textAlign: "center", color: "#53bdeb", fontSize: 14, fontWeight: 500, borderTop: i === 0 ? "none" : "1px solid #2a3942", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>{b.type === "URL" ? "🔗" : b.type === "PHONE_NUMBER" ? "📞" : "⧉"} {b.text || "Button"}</div>)}</div>}
           </div>
-          {/* quick-reply pills (WA shows these as standalone buttons under the bubble) */}
-          {buttons.filter((b) => b.type === "QUICK_REPLY").length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 5 }}>
-              {buttons.filter((b) => b.type === "QUICK_REPLY").map((b, i) => (
-                <div key={i} style={{ background: "#1f2c33", borderRadius: 8, padding: "9px 0", textAlign: "center", color: "#53bdeb", fontSize: 14, fontWeight: 500, boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>{b.text || "Quick reply"}</div>
-              ))}
-            </div>
-          )}
-          {/* carousel cards */}
-          {cards.length > 0 && (
-            <div style={{ display: "flex", gap: 8, marginTop: 8, overflowX: "auto", paddingBottom: 4 }}>
-              {cards.map((card, i) => { const cp = parseTplComponents(card.components); return (
-                <div key={i} style={{ flex: "0 0 180px", background: "#1f2c33", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
-                  <div style={{ height: 100, background: "linear-gradient(135deg,#10202a,#15303a)", display: "grid", placeItems: "center", color: "#5b7682", fontSize: 26 }}>{cp.header?.format === "video" ? "🎬" : "🖼️"}</div>
-                  <div style={{ padding: "7px 9px" }}>
-                    <div style={{ fontSize: 12.5, color: "#e9edef", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }} dangerouslySetInnerHTML={{ __html: waMarkdownToHtml(cp.body) || "Card text" }} />
-                    {cp.buttons.map((b, k) => <div key={k} style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #2a3942", textAlign: "center", color: "#53bdeb", fontSize: 12.5, fontWeight: 500 }}>{b.type === "URL" ? "🔗 " : b.type === "PHONE_NUMBER" ? "📞 " : "↩ "}{b.text}</div>)}
-                  </div>
-                </div>
-              ); })}
-            </div>
-          )}
+          {qrBtns.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 5 }}>{qrBtns.map((b, i) => <div key={i} style={{ background: "#1f2c33", borderRadius: 8, padding: "9px 0", textAlign: "center", color: "#53bdeb", fontSize: 14, fontWeight: 500, boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>{b.text || "Quick reply"}</div>)}</div>}
+          {cards.length > 0 && <div style={{ display: "flex", gap: 8, marginTop: 8, overflowX: "auto", paddingBottom: 4 }}>{cards.map((card, i) => { const cp = tParse(card.components); return (
+            <div key={i} style={{ flex: "0 0 180px", background: "#1f2c33", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
+              <div style={{ height: 100, background: "linear-gradient(135deg,#10202a,#15303a)", display: "grid", placeItems: "center", color: "#5b7682", fontSize: 26 }}>{cp.header?.format === "video" ? "🎬" : "🖼️"}</div>
+              <div style={{ padding: "7px 9px" }}><div style={{ fontSize: 12.5, color: "#e9edef", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }} dangerouslySetInnerHTML={{ __html: tMd(cp.body) || "Card text" }} />{cp.buttons.map((b, k) => <div key={k} style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #2a3942", textAlign: "center", color: "#53bdeb", fontSize: 12.5, fontWeight: 500 }}>{b.type === "URL" ? "🔗 " : b.type === "PHONE_NUMBER" ? "📞 " : "↩ "}{b.text}</div>)}</div>
+            </div>); })}</div>}
         </div>
       </div>
     </div>
@@ -1119,271 +1118,180 @@ function WaPhone({ parts, examples }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CREATE / EDIT FORM
+//  BUILDER (create / edit)
 // ─────────────────────────────────────────────────────────────────────────────
-function TemplateCreate({ onClose, onDone, prefill, waba }) {
-  const pf = prefill || {};
+function Builder({ inbox, onClose, onDone, prefill }) {
+  const pf = prefill || {}; const IID = inbox.id;
   const [category, setCategory] = useState(pf.category || "MARKETING");
   const [language, setLanguage] = useState(pf.language || "en");
   const [name, setName] = useState(pf.name || "");
-  const [headerType, setHeaderType] = useState(pf.header?.format || "none");
-  const [headerText, setHeaderText] = useState(pf.header?.format === "text" ? (pf.header.text || "") : "");
-  const [headerHandle, setHeaderHandle] = useState("");
-  const [headerName, setHeaderName] = useState("");
-  const [headerPreviewUrl, setHeaderPreviewUrl] = useState("");
+  const [hType, setHType] = useState(pf.header?.format || "none");
+  const [hText, setHText] = useState(pf.header?.format === "text" ? (pf.header.text || "") : "");
+  const [hHandle, setHHandle] = useState(""); const [hName, setHName] = useState(""); const [hUrl, setHUrl] = useState("");
   const [body, setBody] = useState(pf.body || "");
   const [footer, setFooter] = useState(pf.footer || "");
   const [buttons, setButtons] = useState(pf.buttons ? pf.buttons.map((b) => ({ type: b.type, text: b.text || "", url: b.url || "", phone_number: b.phone_number || "" })) : []);
-  const [cards, setCards] = useState(pf.cards ? pf.cards.map((c) => { const cp = parseTplComponents(c.components); return { header_type: cp.header?.format || "image", header_handle: "", header_name: "", body_text: cp.body || "", buttons: (cp.buttons || []).map((b) => ({ type: b.type, text: b.text || "", url: b.url || "", phone_number: b.phone_number || "" })) }; }) : []);
-  const [useCarousel, setUseCarousel] = useState((pf.cards || []).length > 0);
-  const [varExamples, setVarExamples] = useState([]);
-  const [authSecurity, setAuthSecurity] = useState(true);
-  const [authExpiry, setAuthExpiry] = useState("");
-  const [authButtonText, setAuthButtonText] = useState("Copy Code");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef(null);
-  const bodyRef = useRef(null);
+  const [cards, setCards] = useState(pf.cards ? pf.cards.map((c) => { const cp = tParse(c.components); return { header_type: cp.header?.format || "image", header_handle: "", header_name: "", body_text: cp.body || "", buttons: (cp.buttons || []).map((b) => ({ type: b.type, text: b.text || "", url: b.url || "" })) }; }) : []);
+  const [useCar, setUseCar] = useState((pf.cards || []).length > 0);
+  const [vars, setVars] = useState([]);
+  const [aSec, setASec] = useState(true); const [aExp, setAExp] = useState(""); const [aBtn, setABtn] = useState("Copy Code");
+  const [submitting, setSubmitting] = useState(false); const [error, setError] = useState(""); const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null); const bodyRef = useRef(null);
 
   const isAuth = category === "AUTHENTICATION";
-  const isMediaHeader = !isAuth && ["image", "video", "document"].includes(headerType);
-  const nVars = countVars(body);
-  useEffect(() => { setVarExamples((prev) => { const a = prev.slice(0, nVars); while (a.length < nVars) a.push(""); return a; }); }, [nVars]);
+  const isMedia = !isAuth && ["image", "video", "document"].includes(hType);
+  const nV = tVars(body);
+  useEffect(() => { setVars((p) => { const a = p.slice(0, nV); while (a.length < nV) a.push(""); return a; }); }, [nV]);
 
-  // rich-text: wrap selection in body textarea with a marker (* _ ~ ```)
-  const wrapSel = (mark) => {
-    const ta = bodyRef.current; if (!ta) { setBody((b) => b + mark + "text" + mark); return; }
-    const s = ta.selectionStart, e = ta.selectionEnd; const val = ta.value;
-    const sel = val.slice(s, e) || "text";
-    const next = val.slice(0, s) + mark + sel + mark + val.slice(e);
-    setBody(next);
-    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s + mark.length, s + mark.length + sel.length); });
-  };
-  const insertVar = () => {
-    const ta = bodyRef.current; const n = nVars + 1; const token = "{{" + n + "}}";
-    if (!ta) { setBody((b) => b + token); return; }
-    const s = ta.selectionStart, val = ta.value;
-    setBody(val.slice(0, s) + token + val.slice(s));
-    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s + token.length, s + token.length); });
-  };
+  const wrap = (m) => { const ta = bodyRef.current; if (!ta) return setBody((b) => b + m + "text" + m); const s = ta.selectionStart, e = ta.selectionEnd, v = ta.value, sel = v.slice(s, e) || "text"; setBody(v.slice(0, s) + m + sel + m + v.slice(e)); requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s + m.length, s + m.length + sel.length); }); };
+  const insVar = () => { const ta = bodyRef.current, tok = "{{" + (nV + 1) + "}}"; if (!ta) return setBody((b) => b + tok); const s = ta.selectionStart, v = ta.value; setBody(v.slice(0, s) + tok + v.slice(s)); requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s + tok.length, s + tok.length); }); };
 
-  const uploadMedia = async (file, cb) => {
-    setUploading(true); setError("");
-    try { const fd = new FormData(); fd.append("file", file); fd.append("account_id", String(ACCOUNT_ID)); const j = await (await fetch(`${API}/api/templates/upload-media`, { method: "POST", body: fd })).json();
-      if (j.ok && j.handle) cb(j.handle, file.name, URL.createObjectURL(file)); else setError(j.error || "Media upload failed."); }
-    catch { setError("Media upload failed."); }
-    setUploading(false);
-  };
+  const upload = async (file, cb) => { setUploading(true); setError(""); try { const fd = new FormData(); fd.append("file", file); fd.append("account_id", String(ACCOUNT_ID)); fd.append("inbox_id", String(IID)); const j = await (await fetch(`${API}/api/templates/upload-media`, { method: "POST", body: fd })).json(); if (j.ok && j.handle) cb(j.handle, file.name, URL.createObjectURL(file)); else setError(j.error || "Media upload failed."); } catch { setError("Media upload failed."); } setUploading(false); };
 
-  // button limit helpers
-  const nQR = buttons.filter((b) => b.type === "QUICK_REPLY").length;
-  const nURL = buttons.filter((b) => b.type === "URL").length;
-  const nPH = buttons.filter((b) => b.type === "PHONE_NUMBER").length;
-  const addButton = (type) => { if (type === "QUICK_REPLY" && nQR >= 10) return; if (type === "URL" && nURL >= 2) return; if (type === "PHONE_NUMBER" && nPH >= 1) return; if (buttons.length >= 10) return; setButtons((b) => [...b, { type, text: "", url: "", phone_number: "" }]); };
-  const setBtn = (i, patch) => setButtons((b) => b.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const nQR = buttons.filter((b) => b.type === "QUICK_REPLY").length, nU = buttons.filter((b) => b.type === "URL").length, nP = buttons.filter((b) => b.type === "PHONE_NUMBER").length;
+  const addBtnT = (type) => { if (type === "QUICK_REPLY" && nQR >= 10) return; if (type === "URL" && nU >= 2) return; if (type === "PHONE_NUMBER" && nP >= 1) return; if (buttons.length >= 10) return; setButtons((b) => [...b, { type, text: "", url: "", phone_number: "" }]); };
+  const setB = (i, p) => setButtons((b) => b.map((x, j) => (j === i ? { ...x, ...p } : x)));
 
-  // carousel card ops
   const addCard = () => { if (cards.length >= 10) return; setCards((c) => [...c, { header_type: c[0]?.header_type || "image", header_handle: "", header_name: "", body_text: "", buttons: [] }]); };
-  const setCard = (i, patch) => setCards((c) => c.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  const delCard = (i) => setCards((c) => c.filter((_, j) => j !== i));
+  const setCard = (i, p) => setCards((c) => c.map((x, j) => (j === i ? { ...x, ...p } : x)));
 
   const validate = () => {
-    if (!/^[a-z0-9_]+$/.test(name)) return "Name must be lowercase letters, numbers and underscores only (e.g. order_update).";
-    if (!isAuth && !useCarousel && !body.trim()) return "Body text is required.";
-    if (isMediaHeader && !headerHandle) return `Upload a sample ${headerType} for the header, or set header to None/Text.`;
-    for (const b of buttons) { if (!b.text.trim()) return "Every button needs a label."; if (b.type === "URL" && !b.url.trim()) return "URL buttons need a link."; if (b.type === "PHONE_NUMBER" && !b.phone_number.trim()) return "Call buttons need a phone number."; }
-    if (useCarousel) { if (cards.length < 2) return "A carousel needs at least 2 cards."; for (const c of cards) { if (!c.body_text.trim()) return "Every carousel card needs body text."; if (!c.header_handle) return "Every carousel card needs a sample media upload."; for (const b of (c.buttons || [])) { if (!b.text.trim()) return "Every card button needs a label."; } } }
+    if (!/^[a-z0-9_]+$/.test(name)) return "Name must be lowercase letters, numbers and underscores only.";
+    if (!isAuth && !useCar && !body.trim()) return "Body text is required.";
+    if (isMedia && !hHandle) return `Upload a sample ${hType} for the header, or set header to None/Text.`;
+    for (const b of buttons) { if (!b.text.trim()) return "Every button needs a label."; if (b.type === "URL" && !b.url.trim()) return "URL buttons need a link."; if (b.type === "PHONE_NUMBER" && !b.phone_number.trim()) return "Call buttons need a number."; }
+    if (useCar) { if (cards.length < 2) return "A carousel needs at least 2 cards."; for (const c of cards) { if (!c.body_text.trim()) return "Every card needs text."; if (!c.header_handle) return "Every card needs a sample media upload."; for (const b of (c.buttons || [])) if (!b.text.trim()) return "Every card button needs a label."; } }
     return "";
   };
-
   const submit = async () => {
     const v = validate(); if (v) { setError(v); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     setSubmitting(true); setError("");
-    const examplesValid = varExamples.filter((x) => x.trim()).length === nVars && nVars > 0;
-    const payload = {
-      account_id: ACCOUNT_ID, name, language, category,
-      header_type: isAuth ? "none" : headerType, header_text: headerText, header_handle: headerHandle || undefined,
-      body_text: body, footer_text: footer, buttons: isAuth ? [] : buttons,
-      body_example: examplesValid ? varExamples : undefined,
-      add_security_recommendation: authSecurity, code_expiration_minutes: authExpiry ? parseInt(authExpiry, 10) : undefined, button_text: authButtonText,
-      cards: useCarousel ? cards.map((c) => ({ header_type: c.header_type, header_handle: c.header_handle || undefined, body_text: c.body_text, buttons: c.buttons })) : undefined,
-    };
-    try { const j = await (await fetch(`${API}/api/templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })).json();
-      if (j.ok) onDone(); else { setError(j.error || "Couldn't submit. Check the fields and try again."); window.scrollTo({ top: 0, behavior: "smooth" }); } }
-    catch { setError("Couldn't reach the server."); }
+    const exOk = vars.filter((x) => x.trim()).length === nV && nV > 0;
+    const payload = { account_id: ACCOUNT_ID, inbox_id: IID, name, language, category, header_type: isAuth ? "none" : hType, header_text: hText, header_handle: hHandle || undefined, body_text: body, footer_text: footer, buttons: isAuth ? [] : buttons, body_example: exOk ? vars : undefined, add_security_recommendation: aSec, code_expiration_minutes: aExp ? parseInt(aExp, 10) : undefined, button_text: aBtn, cards: useCar ? cards.map((c) => ({ header_type: c.header_type, header_handle: c.header_handle || undefined, body_text: c.body_text, buttons: c.buttons })) : undefined };
+    try { const j = await (await fetch(`${API}/api/templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })).json(); if (j.ok) onDone(); else { setError(j.error || "Couldn't submit. Check the fields and try again."); window.scrollTo({ top: 0, behavior: "smooth" }); } } catch { setError("Couldn't reach the server."); }
     setSubmitting(false);
   };
 
-  // preview parts
-  const previewParts = isAuth
-    ? { body: (body || "{{1}} is your verification code.").replace(/\{\{1\}\}/, "123456"), footer: authSecurity ? "For your security, do not share this code." : "", buttons: [{ type: "COPY_CODE", text: authButtonText || "Copy Code" }] }
-    : { header: headerType !== "none" ? { format: headerType, text: headerText, previewUrl: headerPreviewUrl } : null, body, footer, buttons, cards: useCarousel ? cards.map((c) => ({ components: [{ type: "HEADER", format: c.header_type }, { type: "BODY", text: c.body_text }, ...(c.buttons.length ? [{ type: "BUTTONS", buttons: c.buttons }] : [])] })) : [] };
+  const prev = isAuth
+    ? { body: (body || "{{1}} is your verification code.").replace(/\{\{1\}\}/, "123456"), footer: aSec ? "For your security, do not share this code." : "", buttons: [{ type: "COPY_CODE", text: aBtn || "Copy Code" }] }
+    : { header: hType !== "none" ? { format: hType, text: hText, url: hUrl } : null, body, footer, buttons, cards: useCar ? cards.map((c) => ({ components: [{ type: "HEADER", format: c.header_type }, { type: "BODY", text: c.body_text }, ...(c.buttons.length ? [{ type: "BUTTONS", buttons: c.buttons }] : [])] })) : [] };
 
   return (
     <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
-      {/* sticky toolbar */}
       <div style={{ position: "sticky", top: 0, zIndex: 20, background: `linear-gradient(180deg, ${D.panel2}, ${D.panel})`, borderBottom: `1px solid ${D.border}` }}>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "13px 24px", display: "flex", alignItems: "center", gap: 14 }}>
-          <button onClick={onClose} style={btnGhost()}>← Back</button>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>{pf.name ? "Duplicate template" : "New template"}</div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-            <button onClick={submit} disabled={submitting || uploading} className="cs-pub" style={{ ...btnGreen(), opacity: submitting || uploading ? .6 : 1 }}>{submitting ? "Submitting…" : "Submit for review"}</button>
-          </div>
+          <button onClick={onClose} style={btnGh()}>← Back</button>
+          <div><div style={{ fontSize: 15.5, fontWeight: 700 }}>{pf.name ? "Duplicate template" : "New template"}</div><div style={{ fontSize: 11.5, color: D.faint }}>{inbox.name}</div></div>
+          <div style={{ marginLeft: "auto" }}><button onClick={submit} disabled={submitting || uploading} className="cs-pub" style={{ ...btnGo(), opacity: submitting || uploading ? .6 : 1 }}>{submitting ? "Submitting…" : "Submit for review"}</button></div>
         </div>
       </div>
 
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "20px 24px 60px" }}>
-        {error && <Banner kind="err" onX={() => setError("")}>{error}</Banner>}
-
+        {error && <Bnr kind="err" onX={() => setError("")}>{error}</Bnr>}
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 360px", gap: 28, alignItems: "start" }}>
-          {/* ░░░ FORM COLUMN ░░░ */}
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-
-            {/* SETUP card */}
-            <Card title="Setup" icon="⚙️">
-              <Field label="Category">
+            <Crd title="Setup" icon="⚙️">
+              <Fld label="Category">
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 9 }}>
-                  {TPL_CATS.map(([v, l, sub, ic]) => { const on = category === v; const cm = tplCatMeta(v); return (
-                    <div key={v} onClick={() => setCategory(v)} style={{ cursor: "pointer", padding: "12px 11px", borderRadius: 11, border: `1.5px solid ${on ? cm.color : D.border}`, background: on ? hexA(cm.color, .1) : D.panel2, transition: "all .12s" }}>
-                      <div style={{ fontSize: 18, marginBottom: 5 }}>{ic}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: on ? cm.color : D.text }}>{l}</div>
-                      <div style={{ fontSize: 10.5, color: D.faint, marginTop: 2, lineHeight: 1.3 }}>{sub}</div>
+                  {TPL_CATS.map(([v, l, sub, ic]) => { const on = category === v; const cm = tCat(v); return (
+                    <div key={v} onClick={() => setCategory(v)} style={{ cursor: "pointer", padding: "12px 11px", borderRadius: 11, border: `1.5px solid ${on ? cm.c : D.border}`, background: on ? hexA(cm.c, .1) : D.panel2 }}>
+                      <div style={{ fontSize: 18, marginBottom: 5 }}>{ic}</div><div style={{ fontSize: 13, fontWeight: 700, color: on ? cm.c : D.text }}>{l}</div><div style={{ fontSize: 10.5, color: D.faint, marginTop: 2, lineHeight: 1.3 }}>{sub}</div>
                     </div>); })}
                 </div>
-              </Field>
+              </Fld>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Language"><Sel value={language} onChange={setLanguage} options={TPL_LANGS2} /></Field>
-                <Field label="Template name"><In value={name} onChange={(v) => setName(v.toLowerCase().replace(/[^a-z0-9_]/g, "_"))} placeholder="order_confirmation" /></Field>
+                <Fld label="Language"><Slc value={language} onChange={setLanguage} options={TPL_LANGS2} /></Fld>
+                <Fld label="Template name"><Inp value={name} onChange={(v) => setName(v.toLowerCase().replace(/[^a-z0-9_]/g, "_"))} ph="order_confirmation" /></Fld>
               </div>
-              <Hint>Name is permanent and uses lowercase, numbers &amp; underscores. Pick a clear one like <b style={{ color: D.sub }}>welcome_offer</b>.</Hint>
-            </Card>
+              <Hnt>Name is permanent: lowercase, numbers &amp; underscores.</Hnt>
+            </Crd>
 
             {isAuth ? (
-              <Card title="Authentication content" icon="🔐">
-                <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.55, marginBottom: 14, padding: "10px 12px", background: hexA(NC.list, .08), border: `1px solid ${hexA(NC.list, .25)}`, borderRadius: 10 }}>WhatsApp fully controls authentication templates — it inserts the code and the copy button automatically. You only set the options below.</div>
-                <Toggle on={authSecurity} onClick={() => setAuthSecurity(!authSecurity)} label='Add the security line ("For your security, do not share this code.")' />
+              <Crd title="Authentication content" icon="🔐">
+                <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.55, marginBottom: 14, padding: "10px 12px", background: hexA(NC.list, .08), border: `1px solid ${hexA(NC.list, .25)}`, borderRadius: 10 }}>WhatsApp inserts the code and copy button automatically. You only set the options below.</div>
+                <Tgl on={aSec} onClick={() => setASec(!aSec)} label='Add the security line ("do not share this code")' />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-                  <Field label="Code expiry (minutes, optional)"><In value={authExpiry} onChange={(v) => setAuthExpiry(v.replace(/[^0-9]/g, ""))} placeholder="10" /></Field>
-                  <Field label="Copy button text"><In value={authButtonText} maxLength={25} onChange={setAuthButtonText} placeholder="Copy Code" /></Field>
+                  <Fld label="Code expiry (min, optional)"><Inp value={aExp} onChange={(v) => setAExp(v.replace(/[^0-9]/g, ""))} ph="10" /></Fld>
+                  <Fld label="Copy button text"><Inp value={aBtn} maxLength={25} onChange={setABtn} ph="Copy Code" /></Fld>
                 </div>
-              </Card>
+              </Crd>
             ) : (
               <>
-                {/* CONTENT card (only when not a carousel) */}
-                {!useCarousel && (
-                  <Card title="Content" icon="✍️">
-                    <Field label="Header (optional)">
+                {!useCar && (
+                  <Crd title="Content" icon="✍️">
+                    <Fld label="Header (optional)">
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {TPL_HEADER_TYPES.map(([v, l, ic]) => { const on = headerType === v; return (
-                          <div key={v} onClick={() => { setHeaderType(v); setHeaderHandle(""); setHeaderName(""); setHeaderPreviewUrl(""); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, border: `1.5px solid ${on ? ACCENT : D.border}`, background: on ? hexA(ACCENT, .13) : D.panel2, color: on ? "#bdd4ff" : D.sub }}><span>{ic}</span>{l}</div>); })}
+                        {TPL_HDRS.map(([v, l, ic]) => { const on = hType === v; return <div key={v} onClick={() => { setHType(v); setHHandle(""); setHName(""); setHUrl(""); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, border: `1.5px solid ${on ? ACCENT : D.border}`, background: on ? hexA(ACCENT, .13) : D.panel2, color: on ? "#bdd4ff" : D.sub }}><span>{ic}</span>{l}</div>; })}
                       </div>
-                      {headerType === "text" && <div style={{ marginTop: 9 }}><In value={headerText} maxLength={60} onChange={setHeaderText} placeholder="Header text (max 60 chars)" /></div>}
-                      {isMediaHeader && <div style={{ marginTop: 9 }}>
-                        <input ref={fileRef} type="file" accept={headerType === "image" ? "image/*" : headerType === "video" ? "video/*" : "application/pdf"} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadMedia(f, (h, nm, url) => { setHeaderHandle(h); setHeaderName(nm); setHeaderPreviewUrl(url); }); }} style={{ display: "none" }} />
-                        <button onClick={() => fileRef.current?.click()} disabled={uploading} style={dashBtn(NC.media)}>{uploading ? "Uploading…" : headerHandle ? `✓ ${headerName} — change` : `📎 Upload sample ${headerType}`}</button>
-                        <Hint>WhatsApp needs one sample {headerType} to approve the template. Your real {headerType} is chosen when you send it.</Hint>
+                      {hType === "text" && <div style={{ marginTop: 9 }}><Inp value={hText} maxLength={60} onChange={setHText} ph="Header text (max 60)" /></div>}
+                      {isMedia && <div style={{ marginTop: 9 }}>
+                        <input ref={fileRef} type="file" accept={hType === "image" ? "image/*" : hType === "video" ? "video/*" : "application/pdf"} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) upload(f, (h, nm, u) => { setHHandle(h); setHName(nm); setHUrl(u); }); }} style={{ display: "none" }} />
+                        <button onClick={() => fileRef.current?.click()} disabled={uploading} style={dash(NC.media)}>{uploading ? "Uploading…" : hHandle ? `✓ ${hName} — change` : `📎 Upload sample ${hType}`}</button>
+                        <Hnt>One sample {hType} is needed for approval. Your real {hType} is chosen at send time.</Hnt>
                       </div>}
-                    </Field>
-
-                    <Field label={`Body${nVars ? ` · ${nVars} variable${nVars > 1 ? "s" : ""}` : ""}`}>
-                      {/* rich text toolbar */}
+                    </Fld>
+                    <Fld label={`Body${nV ? ` · ${nV} variable${nV > 1 ? "s" : ""}` : ""}`}>
                       <div style={{ display: "flex", gap: 4, marginBottom: 7, alignItems: "center", flexWrap: "wrap" }}>
-                        {[["B", "*", { fontWeight: 800 }], ["I", "_", { fontStyle: "italic" }], ["S", "~", { textDecoration: "line-through" }], ["</>", "```", { fontFamily: "monospace", fontSize: 11 }]].map(([lbl, mark, st]) => (
-                          <button key={mark} onClick={() => wrapSel(mark)} title={mark === "*" ? "Bold" : mark === "_" ? "Italic" : mark === "~" ? "Strikethrough" : "Monospace"} style={{ minWidth: 30, height: 28, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.text, cursor: "pointer", fontSize: 12.5, ...st }}>{lbl}</button>
-                        ))}
+                        {[["B", "*", { fontWeight: 800 }], ["I", "_", { fontStyle: "italic" }], ["S", "~", { textDecoration: "line-through" }], ["</>", "```", { fontFamily: "monospace", fontSize: 11 }]].map(([lb, m, st]) => <button key={m} onClick={() => wrap(m)} style={{ minWidth: 30, height: 28, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.text, cursor: "pointer", fontSize: 12.5, ...st }}>{lb}</button>)}
                         <div style={{ width: 1, height: 18, background: D.border, margin: "0 4px" }} />
-                        <button onClick={insertVar} style={{ height: 28, padding: "0 11px", borderRadius: 7, border: `1px solid ${hexA(ACCENT, .5)}`, background: hexA(ACCENT, .12), color: "#bdd4ff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{"{ }"} Add variable</button>
+                        <button onClick={insVar} style={{ height: 28, padding: "0 11px", borderRadius: 7, border: `1px solid ${hexA(ACCENT, .5)}`, background: hexA(ACCENT, .12), color: "#bdd4ff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{"{ }"} Variable</button>
                         <span style={{ marginLeft: "auto", fontSize: 11, color: D.faint }}>{body.length}/1024</span>
                       </div>
                       <textarea ref={bodyRef} className="cs-in" value={body} maxLength={1024} onChange={(e) => setBody(e.target.value)} rows={5} placeholder="Hi {{1}}, your order {{2}} is confirmed! 🎉" style={{ width: "100%", padding: "10px 12px", borderRadius: 8, fontSize: 13.5, boxSizing: "border-box", resize: "vertical", fontFamily: T.font, lineHeight: 1.5 }} />
-                      <Hint>Select text then tap <b style={{ color: D.sub }}>B</b> / <b style={{ color: D.sub }}>I</b> / <b style={{ color: D.sub }}>S</b> to format. Use <b style={{ color: D.sub }}>Add variable</b> for values you fill at send time.</Hint>
-                    </Field>
-
-                    {nVars > 0 && (
-                      <Field label="Sample values (for WhatsApp review)">
-                        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                          {Array.from({ length: nVars }).map((_, i) => (
-                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                              <span style={{ fontSize: 11.5, fontWeight: 700, color: ACCENT, fontFamily: "monospace", minWidth: 34 }}>{"{{" + (i + 1) + "}}"}</span>
-                              <div style={{ flex: 1 }}><In value={varExamples[i] || ""} onChange={(v) => setVarExamples((a) => { const c = [...a]; c[i] = v; return c; })} placeholder={i === 0 ? "e.g. Ali" : "e.g. #12345"} /></div>
-                            </div>
-                          ))}
-                        </div>
-                      </Field>
-                    )}
-
-                    <Field label="Footer (optional)"><In value={footer} maxLength={60} onChange={setFooter} placeholder="e.g. Reply STOP to unsubscribe" /></Field>
-                  </Card>
+                      <Hnt>Select text then tap <b style={{ color: D.sub }}>B/I/S</b> to format. <b style={{ color: D.sub }}>Variable</b> = values you fill at send time.</Hnt>
+                    </Fld>
+                    {nV > 0 && <Fld label="Sample values (for review)"><div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{Array.from({ length: nV }).map((_, i) => <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}><span style={{ fontSize: 11.5, fontWeight: 700, color: ACCENT, fontFamily: "monospace", minWidth: 34 }}>{"{{" + (i + 1) + "}}"}</span><div style={{ flex: 1 }}><Inp value={vars[i] || ""} onChange={(v) => setVars((a) => { const c = [...a]; c[i] = v; return c; })} ph={i === 0 ? "e.g. Ali" : "e.g. #12345"} /></div></div>)}</div></Fld>}
+                    <Fld label="Footer (optional)"><Inp value={footer} maxLength={60} onChange={setFooter} ph="e.g. Reply STOP to unsubscribe" /></Fld>
+                  </Crd>
                 )}
 
-                {/* BUTTONS card (only when not a carousel) */}
-                {!useCarousel && (
-                  <Card title="Buttons" icon="🔘" right={<span style={{ fontSize: 11, color: D.faint }}>{buttons.length}/10</span>}>
+                {!useCar && (
+                  <Crd title="Buttons" icon="🔘" right={<span style={{ fontSize: 11, color: D.faint }}>{buttons.length}/10</span>}>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: buttons.length ? 12 : 0 }}>
-                      <button onClick={() => addButton("QUICK_REPLY")} disabled={nQR >= 10} style={addPill(nQR >= 10)}>↩ Quick reply <span style={{ color: D.faint }}>{nQR}/10</span></button>
-                      <button onClick={() => addButton("URL")} disabled={nURL >= 2} style={addPill(nURL >= 2)}>🔗 Visit website <span style={{ color: D.faint }}>{nURL}/2</span></button>
-                      <button onClick={() => addButton("PHONE_NUMBER")} disabled={nPH >= 1} style={addPill(nPH >= 1)}>📞 Call <span style={{ color: D.faint }}>{nPH}/1</span></button>
+                      <button onClick={() => addBtnT("QUICK_REPLY")} disabled={nQR >= 10} style={pill(nQR >= 10)}>↩ Quick reply <span style={{ color: D.faint }}>{nQR}/10</span></button>
+                      <button onClick={() => addBtnT("URL")} disabled={nU >= 2} style={pill(nU >= 2)}>🔗 Visit website <span style={{ color: D.faint }}>{nU}/2</span></button>
+                      <button onClick={() => addBtnT("PHONE_NUMBER")} disabled={nP >= 1} style={pill(nP >= 1)}>📞 Call <span style={{ color: D.faint }}>{nP}/1</span></button>
                     </div>
                     {buttons.map((b, i) => (
                       <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 10, padding: 10, marginBottom: 9, background: D.panel2 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: b.type === "URL" ? "#9ec1ff" : b.type === "PHONE_NUMBER" ? NC.buttons : NC.list }}>{b.type === "QUICK_REPLY" ? "↩ Quick reply" : b.type === "URL" ? "🔗 Website" : "📞 Call"}</span>
-                          <button onClick={() => setButtons((bs) => bs.filter((_, j) => j !== i))} style={{ ...miniX(), marginLeft: "auto" }}>✕</button>
-                        </div>
-                        <In value={b.text} maxLength={25} onChange={(v) => setBtn(i, { text: v })} placeholder="Button text (max 25)" />
-                        {b.type === "URL" && <div style={{ marginTop: 7 }}><In value={b.url} onChange={(v) => setBtn(i, { url: v })} placeholder="https://example.com/{{1}}" /></div>}
-                        {b.type === "PHONE_NUMBER" && <div style={{ marginTop: 7 }}><In value={b.phone_number} onChange={(v) => setBtn(i, { phone_number: v })} placeholder="+92300xxxxxxx" /></div>}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", color: b.type === "URL" ? "#9ec1ff" : b.type === "PHONE_NUMBER" ? NC.buttons : NC.list }}>{b.type === "QUICK_REPLY" ? "↩ Quick reply" : b.type === "URL" ? "🔗 Website" : "📞 Call"}</span><button onClick={() => setButtons((bs) => bs.filter((_, j) => j !== i))} style={{ ...xMini(), marginLeft: "auto" }}>✕</button></div>
+                        <Inp value={b.text} maxLength={25} onChange={(v) => setB(i, { text: v })} ph="Button text (max 25)" />
+                        {b.type === "URL" && <div style={{ marginTop: 7 }}><Inp value={b.url} onChange={(v) => setB(i, { url: v })} ph="https://example.com/{{1}}" /></div>}
+                        {b.type === "PHONE_NUMBER" && <div style={{ marginTop: 7 }}><Inp value={b.phone_number} onChange={(v) => setB(i, { phone_number: v })} ph="+92300xxxxxxx" /></div>}
                       </div>
                     ))}
-                    <Hint>Up to 10 quick replies, 2 website buttons and 1 call button.</Hint>
-                  </Card>
+                    <Hnt>Up to 10 quick replies, 2 website buttons and 1 call button.</Hnt>
+                  </Crd>
                 )}
 
-                {/* CAROUSEL card */}
-                <Card title="Carousel" icon="🎠" right={
-                  <Toggle on={useCarousel} onClick={() => setUseCarousel(!useCarousel)} label="" small />
-                }>
-                  {!useCarousel ? (
-                    <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.55 }}>Turn this on to send a swipeable set of cards (2–10), each with its own image/video, text and buttons. Great for product showcases. <span style={{ color: D.faint }}>Turning it on uses the carousel instead of a single message body.</span></div>
-                  ) : (
+                <Crd title="Carousel" icon="🎠" right={<Tgl on={useCar} onClick={() => setUseCar(!useCar)} label="" small />}>
+                  {!useCar ? <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.55 }}>Turn on to send 2–10 swipeable cards, each with its own image/video, text and buttons. The body above becomes the intro message.</div> : (
                     <>
-                      <div style={{ fontSize: 12, color: D.sub, lineHeight: 1.5, marginBottom: 12, padding: "9px 11px", background: hexA(NC.list, .07), border: `1px solid ${hexA(NC.list, .22)}`, borderRadius: 9 }}>The body above becomes the intro message shown before the cards. Every card must use the same media type and button layout.</div>
+                      <div style={{ fontSize: 12, color: D.sub, lineHeight: 1.5, marginBottom: 12, padding: "9px 11px", background: hexA(NC.list, .07), border: `1px solid ${hexA(NC.list, .22)}`, borderRadius: 9 }}>Every card must use the same media type and button layout.</div>
                       {cards.map((c, i) => (
                         <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 11, padding: 12, marginBottom: 11, background: D.panel2 }}>
-                          <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: NC.list }}>Card {i + 1}</span>
-                            <button onClick={() => delCard(i)} style={{ ...miniX(), marginLeft: "auto" }}>✕ Remove</button>
-                          </div>
-                          <Field label="Card media" tight>
-                            <div style={{ display: "flex", gap: 7, marginBottom: 8 }}>
-                              {[["image", "Image", "🖼️"], ["video", "Video", "🎬"]].map(([v, l, ic]) => { const on = c.header_type === v; return <div key={v} onClick={() => setCard(i, { header_type: v, header_handle: "", header_name: "" })} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: `1px solid ${on ? NC.list : D.border}`, background: on ? hexA(NC.list, .13) : D.input, color: on ? NC.list : D.sub }}><span>{ic}</span>{l}</div>; })}
-                            </div>
-                            <CardMediaUpload card={c} onUpload={(file) => uploadMedia(file, (h, nm) => setCard(i, { header_handle: h, header_name: nm }))} uploading={uploading} />
-                          </Field>
-                          <Field label="Card text" tight><textarea className="cs-in" value={c.body_text} maxLength={160} onChange={(e) => setCard(i, { body_text: e.target.value })} rows={2} placeholder="Card description (max 160)" style={{ width: "100%", padding: "9px 11px", borderRadius: 8, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} /></Field>
-                          <CardButtons card={c} onChange={(btns) => setCard(i, { buttons: btns })} />
+                          <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 700, color: NC.list }}>Card {i + 1}</span><button onClick={() => setCards((cc) => cc.filter((_, j) => j !== i))} style={{ ...xMini(), marginLeft: "auto" }}>✕ Remove</button></div>
+                          <Fld label="Card media" tight>
+                            <div style={{ display: "flex", gap: 7, marginBottom: 8 }}>{[["image", "Image", "🖼️"], ["video", "Video", "🎬"]].map(([v, l, ic]) => { const on = c.header_type === v; return <div key={v} onClick={() => setCard(i, { header_type: v, header_handle: "", header_name: "" })} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: `1px solid ${on ? NC.list : D.border}`, background: on ? hexA(NC.list, .13) : D.input, color: on ? NC.list : D.sub }}><span>{ic}</span>{l}</div>; })}</div>
+                            <CardUp card={c} onUp={(file) => upload(file, (h, nm) => setCard(i, { header_handle: h, header_name: nm }))} uploading={uploading} />
+                          </Fld>
+                          <Fld label="Card text" tight><textarea className="cs-in" value={c.body_text} maxLength={160} onChange={(e) => setCard(i, { body_text: e.target.value })} rows={2} placeholder="Card description (max 160)" style={{ width: "100%", padding: "9px 11px", borderRadius: 8, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} /></Fld>
+                          <CardBtns card={c} onChange={(b) => setCard(i, { buttons: b })} />
                         </div>
                       ))}
-                      {cards.length < 10 && <button onClick={addCard} style={dashBtn(NC.list)}>＋ Add card {cards.length > 0 ? `(${cards.length}/10)` : ""}</button>}
-                      {cards.length < 2 && <Hint>A carousel needs at least 2 cards.</Hint>}
+                      {cards.length < 10 && <button onClick={addCard} style={dash(NC.list)}>＋ Add card {cards.length ? `(${cards.length}/10)` : ""}</button>}
+                      {cards.length < 2 && <Hnt>A carousel needs at least 2 cards.</Hnt>}
                     </>
                   )}
-                </Card>
+                </Crd>
               </>
             )}
           </div>
 
-          {/* ░░░ PREVIEW COLUMN ░░░ */}
           <div style={{ position: "sticky", top: 78 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: D.faint }}>Live preview</span>
-              <span style={{ fontSize: 10.5, color: D.faint, marginLeft: "auto" }}>Updates as you type</span>
-            </div>
-            <WaPhone parts={previewParts} examples={varExamples} />
-            <div style={{ marginTop: 12, padding: "11px 13px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 11, fontSize: 11.5, color: D.sub, lineHeight: 1.55 }}>
-              <b style={{ color: D.text }}>How approval works:</b> after you submit, WhatsApp reviews the template (usually minutes, up to 24h). You'll see <span style={{ color: "#fbbf24" }}>In review</span> → <span style={{ color: "#34d399" }}>Approved</span> or <span style={{ color: "#fb7185" }}>Rejected</span> on the list. Approved templates appear in your Campaigns.
-            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}><span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: D.faint }}>Live preview</span><span style={{ fontSize: 10.5, color: D.faint, marginLeft: "auto" }}>Updates as you type</span></div>
+            <Phone parts={prev} ex={vars} />
+            <div style={{ marginTop: 12, padding: "11px 13px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 11, fontSize: 11.5, color: D.sub, lineHeight: 1.55 }}><b style={{ color: D.text }}>Approval:</b> after submit, WhatsApp reviews (minutes–24h). You'll see <span style={{ color: "#fbbf24" }}>In review</span> → <span style={{ color: "#34d399" }}>Approved</span> or <span style={{ color: "#fb7185" }}>Rejected</span>. Approved templates show up in Campaigns.</div>
           </div>
         </div>
       </div>
@@ -1391,78 +1299,62 @@ function TemplateCreate({ onClose, onDone, prefill, waba }) {
   );
 }
 
-// carousel card media upload button (separate so each card manages its own file input)
-function CardMediaUpload({ card, onUpload, uploading }) {
+function CardUp({ card, onUp, uploading }) {
   const ref = useRef(null);
-  return (<>
-    <input ref={ref} type="file" accept={card.header_type === "video" ? "video/*" : "image/*"} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onUpload(f); }} style={{ display: "none" }} />
-    <button onClick={() => ref.current?.click()} disabled={uploading} style={dashBtn(NC.list)}>{card.header_handle ? `✓ ${card.header_name || "Uploaded"} — change` : `📎 Upload ${card.header_type}`}</button>
-  </>);
+  return (<><input ref={ref} type="file" accept={card.header_type === "video" ? "video/*" : "image/*"} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onUp(f); }} style={{ display: "none" }} /><button onClick={() => ref.current?.click()} disabled={uploading} style={dash(NC.list)}>{card.header_handle ? `✓ ${card.header_name || "Uploaded"} — change` : `📎 Upload ${card.header_type}`}</button></>);
 }
-// carousel card buttons (max 2 per card: quick reply / url)
-function CardButtons({ card, onChange }) {
-  const btns = card.buttons || [];
-  const add = (type) => { if (btns.length >= 2) return; onChange([...btns, { type, text: "", url: "", phone_number: "" }]); };
-  const set = (i, patch) => onChange(btns.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+function CardBtns({ card, onChange }) {
+  const b = card.buttons || [];
+  const add = (type) => { if (b.length >= 2) return; onChange([...b, { type, text: "", url: "" }]); };
+  const set = (i, p) => onChange(b.map((x, j) => (j === i ? { ...x, ...p } : x)));
   return (
-    <Field label="Card buttons (optional, max 2)" tight>
-      <div style={{ display: "flex", gap: 7, marginBottom: btns.length ? 8 : 0 }}>
-        <button onClick={() => add("QUICK_REPLY")} disabled={btns.length >= 2} style={addPill(btns.length >= 2)}>↩ Quick reply</button>
-        <button onClick={() => add("URL")} disabled={btns.length >= 2} style={addPill(btns.length >= 2)}>🔗 Website</button>
-      </div>
-      {btns.map((b, i) => (
-        <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 8, padding: 8, marginBottom: 7, background: D.input }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: b.type === "URL" ? "#9ec1ff" : NC.list }}>{b.type === "URL" ? "🔗 Website" : "↩ Quick reply"}</span>
-            <button onClick={() => onChange(btns.filter((_, j) => j !== i))} style={{ ...miniX(), marginLeft: "auto" }}>✕</button>
-          </div>
-          <In value={b.text} maxLength={25} onChange={(v) => set(i, { text: v })} placeholder="Button text" />
-          {b.type === "URL" && <div style={{ marginTop: 6 }}><In value={b.url} onChange={(v) => set(i, { url: v })} placeholder="https://…" /></div>}
-        </div>
-      ))}
-    </Field>
+    <Fld label="Card buttons (optional, max 2)" tight>
+      <div style={{ display: "flex", gap: 7, marginBottom: b.length ? 8 : 0 }}><button onClick={() => add("QUICK_REPLY")} disabled={b.length >= 2} style={pill(b.length >= 2)}>↩ Quick reply</button><button onClick={() => add("URL")} disabled={b.length >= 2} style={pill(b.length >= 2)}>🔗 Website</button></div>
+      {b.map((bt, i) => <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 8, padding: 8, marginBottom: 7, background: D.input }}><div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}><span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: bt.type === "URL" ? "#9ec1ff" : NC.list }}>{bt.type === "URL" ? "🔗 Website" : "↩ Quick reply"}</span><button onClick={() => onChange(b.filter((_, j) => j !== i))} style={{ ...xMini(), marginLeft: "auto" }}>✕</button></div><Inp value={bt.text} maxLength={25} onChange={(v) => set(i, { text: v })} ph="Button text" />{bt.type === "URL" && <div style={{ marginTop: 6 }}><Inp value={bt.url} onChange={(v) => set(i, { url: v })} ph="https://…" /></div>}</div>)}
+    </Fld>
   );
 }
 
-// ── small shared UI atoms (scoped to templates; names are unique) ──
-function Card({ title, icon, right, children }) {
+// ── shared sharp UI atoms (unique names) ──
+function TopBar({ title, subtitle, icon, onBack, right, extra }) {
   return (
-    <div style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 16px", borderBottom: `1px solid ${D.border}`, background: hexA("#ffffff", .015) }}>
-        <span style={{ fontSize: 15 }}>{icon}</span>
-        <span style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: "-.01em" }}>{title}</span>
-        <div style={{ marginLeft: "auto" }}>{right}</div>
+    <div style={{ borderBottom: `1px solid ${D.border}`, background: `linear-gradient(180deg, ${D.panel2} 0%, ${D.panel} 100%)` }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 24px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        {onBack && <button onClick={onBack} style={{ ...btnSq(), width: 38, height: 38, fontSize: 17 }}>←</button>}
+        <div style={{ width: 42, height: 42, borderRadius: 11, background: `linear-gradient(135deg, ${hexA(NC.buttons, .9)}, ${hexA("#13a884", .9)})`, display: "grid", placeItems: "center", fontSize: 21, boxShadow: `0 6px 18px ${hexA(NC.buttons, .35)}`, flexShrink: 0 }}>{icon}</div>
+        <div style={{ minWidth: 0 }}><div style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div><div style={{ fontSize: 12.5, color: D.sub, marginTop: 1 }}>{subtitle}</div></div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>{extra}{right}</div>
       </div>
-      <div style={{ padding: 16 }}>{children}</div>
     </div>
   );
 }
-function Field({ label, children, tight }) { return (<div style={{ marginBottom: tight ? 10 : 16 }}><div style={{ fontSize: 12, fontWeight: 600, color: D.sub, marginBottom: 7 }}>{label}</div>{children}</div>); }
-function Hint({ children }) { return <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
-function Banner({ kind, children, onX }) {
-  const ok = kind === "ok";
-  return (<div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16, padding: "11px 14px", borderRadius: 11, background: ok ? hexA(NC.buttons, .1) : hexA(NC.stop, .1), border: `1px solid ${ok ? hexA(NC.buttons, .35) : hexA(NC.stop, .35)}`, color: ok ? "#4ade80" : "#fda4af", fontSize: 13 }}>
-    <span style={{ flex: 1, lineHeight: 1.5 }}>{children}</span>
-    {onX && <button onClick={onX} style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontSize: 14, opacity: .7, padding: 0 }}>✕</button>}
+function Empty({ icon, title, sub, action }) {
+  return (<div style={{ border: `1px dashed ${D.border}`, borderRadius: 16, padding: "60px 24px", textAlign: "center", background: `radial-gradient(120% 100% at 50% 0%, ${hexA(NC.buttons, .05)}, transparent)` }}>
+    <div style={{ width: 60, height: 60, margin: "0 auto 16px", borderRadius: 16, background: D.panel2, border: `1px solid ${D.border}`, display: "grid", placeItems: "center", fontSize: 28 }}>{icon}</div>
+    <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 5 }}>{title}</div>
+    <div style={{ fontSize: 13, color: D.sub, marginBottom: action ? 20 : 0 }}>{sub}</div>
+    {action}
   </div>);
 }
-function Modal({ children, onClose, width }) {
-  return (<div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.66)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 16 }}>
-    <div onClick={(e) => e.stopPropagation()} style={{ width: width || 420, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", background: D.panel, border: `1px solid ${D.border}`, borderRadius: 16, padding: 22, fontFamily: T.font, boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>{children}</div>
+function Crd({ title, icon, right, children }) {
+  return (<div style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 16px", borderBottom: `1px solid ${D.border}` }}><span style={{ fontSize: 15 }}>{icon}</span><span style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: "-.01em" }}>{title}</span><div style={{ marginLeft: "auto" }}>{right}</div></div>
+    <div style={{ padding: 16 }}>{children}</div>
   </div>);
 }
-function Toggle({ on, onClick, label, small }) {
-  return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
-    <div style={{ width: small ? 38 : 40, height: small ? 22 : 23, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? (small ? 18 : 19) : 2, width: small ? 18 : 19, height: small ? 18 : 19, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 3px rgba(0,0,0,.4)" }} /></div>
-    {label && <span style={{ fontSize: 12.5, color: D.text, lineHeight: 1.4 }}>{label}</span>}
-  </div>);
-}
-const btnGreen = () => ({ display: "inline-flex", alignItems: "center", gap: 5, padding: "9px 17px", background: "linear-gradient(135deg, #1db954 0%, #16A34A 100%)", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, boxShadow: "0 4px 14px rgba(22,163,74,.32)" });
-const btnGhost = () => ({ padding: "8px 15px", borderRadius: 9, cursor: "pointer", fontSize: 13, fontFamily: T.font, fontWeight: 600, border: `1px solid ${D.border}`, background: D.panel2, color: D.text });
-const btnIcon = () => ({ width: 36, height: 36, borderRadius: 9, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 15, fontFamily: T.font });
-const dashBtn = (c) => ({ width: "100%", padding: "10px 12px", border: `1.5px dashed ${hexA(c, .6)}`, color: c, background: hexA(c, .07), borderRadius: 9, cursor: "pointer", fontFamily: T.font, fontSize: 12.5, fontWeight: 600 });
-const addPill = (disabled) => ({ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: T.font, border: `1px solid ${D.border}`, background: disabled ? "transparent" : D.panel2, color: disabled ? D.faint : D.text, cursor: disabled ? "default" : "pointer", opacity: disabled ? .5 : 1 });
-const miniX = () => ({ border: `1px solid ${hexA(NC.stop, .45)}`, color: "#fb7185", background: "transparent", borderRadius: 6, cursor: "pointer", padding: "3px 9px", fontFamily: T.font, fontSize: 11.5, fontWeight: 600 });
+function Fld({ label, children, tight }) { return (<div style={{ marginBottom: tight ? 10 : 16 }}><div style={{ fontSize: 12, fontWeight: 600, color: D.sub, marginBottom: 7 }}>{label}</div>{children}</div>); }
+function Hnt({ children }) { return <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
+function Bnr({ kind, children, onX }) { const ok = kind === "ok"; return (<div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16, padding: "11px 14px", borderRadius: 11, background: ok ? hexA(NC.buttons, .1) : hexA(NC.stop, .1), border: `1px solid ${ok ? hexA(NC.buttons, .35) : hexA(NC.stop, .35)}`, color: ok ? "#4ade80" : "#fda4af", fontSize: 13 }}><span style={{ flex: 1, lineHeight: 1.5 }}>{children}</span>{onX && <button onClick={onX} style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontSize: 14, opacity: .7 }}>✕</button>}</div>); }
+function Mdl({ children, onClose, w }) { return (<div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.66)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 16 }}><div onClick={(e) => e.stopPropagation()} style={{ width: w || 420, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", background: D.panel, border: `1px solid ${D.border}`, borderRadius: 16, padding: 22, fontFamily: T.font, boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>{children}</div></div>); }
+function Tgl({ on, onClick, label, small }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}><div style={{ width: small ? 38 : 40, height: small ? 22 : 23, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? (small ? 18 : 19) : 2, width: small ? 18 : 19, height: small ? 18 : 19, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 3px rgba(0,0,0,.4)" }} /></div>{label && <span style={{ fontSize: 12.5, color: D.text, lineHeight: 1.4 }}>{label}</span>}</div>); }
+function Inp({ value, onChange, ph, maxLength }) { return (<input className="cs-in" value={value} placeholder={ph} maxLength={maxLength} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 11px", borderRadius: 8, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} />); }
+function Slc({ value, onChange, options }) { return (<select className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 11px", borderRadius: 8, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>{options.map(([v, l]) => <option key={v} value={v} style={{ background: D.panel2 }}>{l}</option>)}</select>); }
+const btnGo = () => ({ display: "inline-flex", alignItems: "center", gap: 5, padding: "9px 17px", background: "linear-gradient(135deg, #1db954 0%, #16A34A 100%)", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, boxShadow: "0 4px 14px rgba(22,163,74,.32)" });
+const btnGh = () => ({ padding: "8px 15px", borderRadius: 9, cursor: "pointer", fontSize: 13, fontFamily: T.font, fontWeight: 600, border: `1px solid ${D.border}`, background: D.panel2, color: D.text });
+const btnSq = () => ({ width: 36, height: 36, borderRadius: 9, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 15, fontFamily: T.font });
+const dash = (c) => ({ width: "100%", padding: "10px 12px", border: `1.5px dashed ${hexA(c, .6)}`, color: c, background: hexA(c, .07), borderRadius: 9, cursor: "pointer", fontFamily: T.font, fontSize: 12.5, fontWeight: 600 });
+const pill = (dis) => ({ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: T.font, border: `1px solid ${D.border}`, background: dis ? "transparent" : D.panel2, color: dis ? D.faint : D.text, cursor: dis ? "default" : "pointer", opacity: dis ? .5 : 1 });
+const xMini = () => ({ border: `1px solid ${hexA(NC.stop, .45)}`, color: "#fb7185", background: "transparent", borderRadius: 6, cursor: "pointer", padding: "3px 9px", fontFamily: T.font, fontSize: 11.5, fontWeight: 600 });
 // ════════════════════════════════════════════════════════════════════════════
 //  END WHATSAPP TEMPLATES
 // ════════════════════════════════════════════════════════════════════════════
