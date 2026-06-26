@@ -893,17 +893,18 @@ function Templates() {
         const wa = (j.inboxes || []).filter((i) => (i.channel_type || "").includes("Whatsapp") || (i.channel_type || "").includes("WhatsApp"));
         const final = wa.length ? wa : (j.inboxes || []);
         setInboxes(final);
-        if (final.length === 1) setPicked(final[0]);  // single number -> skip the picker
+        // NOTE: we always show the number dashboard first (even for a single number)
+        // so the user clearly sees which WhatsApp number they're working on.
       } catch { setInboxes([]); setErr("Couldn't load your WhatsApp numbers. Is the bot engine running?"); }
     })();
   }, []);
 
-  if (picked) return <TemplatesList inbox={picked} onBack={inboxes && inboxes.length > 1 ? () => setPicked(null) : null} />;
+  if (picked) return <TemplatesList inbox={picked} onBack={() => setPicked(null)} />;
 
   // ── number-select dashboard ──
   return (
     <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
-      <TopBar title="Message Templates" subtitle="Choose a WhatsApp number to manage its templates" icon="📨" />
+      <TopBar title="Message Templates" subtitle="Pick a WhatsApp number to view & create its templates" icon="📨" />
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "26px 24px 50px" }}>
         {err && <Bnr kind="err">{err}</Bnr>}
         {inboxes === null && <div style={{ color: D.sub, fontSize: 14, padding: 30, textAlign: "center" }}>Loading numbers…</div>}
@@ -912,8 +913,12 @@ function Templates() {
         )}
         {inboxes && inboxes.length > 0 && (
           <>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: D.faint, marginBottom: 13 }}>Your numbers ({inboxes.length})</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px,1fr))", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: D.faint }}>Your WhatsApp numbers</div>
+              <div style={{ fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 999, background: D.panel2, color: D.sub, border: `1px solid ${D.border}` }}>{inboxes.length}</div>
+              <div style={{ marginLeft: "auto", fontSize: 12, color: D.faint }}>Tap a number to manage templates</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px,1fr))", gap: 14 }}>
               {inboxes.map((ib) => <NumberCard key={ib.id} inbox={ib} onClick={() => setPicked(ib)} />)}
             </div>
           </>
@@ -925,20 +930,25 @@ function Templates() {
 
 function NumberCard({ inbox, onClick }) {
   const [meta, setMeta] = useState(null);
-  useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (j.ok) setMeta(j); } catch {} })(); }, [inbox.id]);
+  const [count, setCount] = useState(null);
+  useEffect(() => {
+    (async () => { try { const j = await (await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (j.ok) setMeta(j); } catch {} })();
+    (async () => { try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (j.ok) setCount((j.templates || []).length); } catch {} })();
+  }, [inbox.id]);
   return (
-    <div onClick={onClick} className="cs-tcard" style={{ cursor: "pointer", background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, padding: 16, transition: "transform .14s, border-color .14s, box-shadow .14s" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 46, height: 46, borderRadius: 12, background: `linear-gradient(135deg, ${hexA(NC.buttons,.9)}, ${hexA("#13a884",.9)})`, display: "grid", placeItems: "center", fontSize: 22, flexShrink: 0, boxShadow: `0 5px 16px ${hexA(NC.buttons,.3)}` }}>💬</div>
+    <div onClick={onClick} className="cs-tcard" style={{ cursor: "pointer", background: D.card, border: `1px solid ${D.border}`, borderRadius: 16, padding: 18, transition: "transform .14s, border-color .14s, box-shadow .14s" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+        <div style={{ width: 50, height: 50, borderRadius: 13, background: `linear-gradient(135deg, ${hexA(NC.buttons,.95)}, ${hexA("#13a884",.95)})`, display: "grid", placeItems: "center", fontSize: 24, flexShrink: 0, boxShadow: `0 6px 18px ${hexA(NC.buttons,.35)}` }}>💬</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inbox.name}</div>
-          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>{meta?.phone || "WhatsApp Cloud"}</div>
+          <div style={{ fontSize: 15.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: "-.01em" }}>{inbox.name}</div>
+          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{meta?.phone || "WhatsApp Cloud API"}</div>
         </div>
-        <div style={{ fontSize: 18, color: D.faint }}>→</div>
+        <div style={{ width: 30, height: 30, borderRadius: 8, background: D.panel2, border: `1px solid ${D.border}`, display: "grid", placeItems: "center", fontSize: 15, color: D.sub }}>→</div>
       </div>
-      <div style={{ marginTop: 13, paddingTop: 13, borderTop: `1px solid ${D.border}`, display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: meta ? "#34d399" : D.faint, display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: meta ? "#34d399" : D.faint }} />{meta ? "Connected" : "Checking…"}</span>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: ACCENT, fontWeight: 600 }}>Manage templates</span>
+      <div style={{ marginTop: 15, paddingTop: 14, borderTop: `1px solid ${D.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: meta ? "#34d399" : D.faint, display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: meta ? "#34d399" : D.faint, boxShadow: meta ? "0 0 8px rgba(52,211,153,.6)" : "none" }} />{meta ? "Connected" : "Checking…"}</span>
+        {count !== null && <span style={{ fontSize: 11.5, fontWeight: 600, color: D.sub }}>· {count} template{count === 1 ? "" : "s"}</span>}
+        <span style={{ marginLeft: "auto", fontSize: 12.5, color: ACCENT, fontWeight: 700 }}>Manage →</span>
       </div>
     </div>
   );
@@ -1086,10 +1096,21 @@ function Phone({ parts, ex }) {
   const html = tMd(tFill(body, ex));
   const inlineBtns = buttons.filter((b) => b.type === "URL" || b.type === "PHONE_NUMBER" || b.type === "COPY_CODE");
   const qrBtns = buttons.filter((b) => b.type === "QUICK_REPLY");
+  const isEmpty = !body && !header && buttons.length === 0 && cards.length === 0;
   return (
-    <div style={{ borderRadius: 18, padding: 14, background: "linear-gradient(160deg,#0b141a,#111b21)", border: `1px solid ${D.border}` }}>
-      <div style={{ borderRadius: 12, padding: "16px 12px", background: "repeating-linear-gradient(135deg, rgba(255,255,255,.012) 0 2px, transparent 2px 22px), #0b141a", minHeight: 80 }}>
+    <div style={{ borderRadius: 20, padding: 12, background: "linear-gradient(160deg,#0b141a,#111b21)", border: `1px solid ${D.border}`, boxShadow: "0 8px 30px rgba(0,0,0,.35)" }}>
+      {/* WhatsApp top bar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px 10px" }}>
+        <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#2a3942,#1f2c33)", display: "grid", placeItems: "center", fontSize: 14, color: "#8696a0" }}>🏢</div>
+        <div style={{ lineHeight: 1.2 }}><div style={{ fontSize: 12.5, fontWeight: 600, color: "#e9edef" }}>Your Business</div><div style={{ fontSize: 10, color: "#8696a0" }}>online</div></div>
+      </div>
+      <div style={{ borderRadius: 12, padding: "16px 12px", background: "repeating-linear-gradient(135deg, rgba(255,255,255,.012) 0 2px, transparent 2px 22px), #0b141a", minHeight: 90 }}>
         <div style={{ maxWidth: 300 }}>
+          {isEmpty ? (
+            <div style={{ background: "#1f2c33", borderRadius: "0 8px 8px 8px", padding: "14px 13px", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
+              <div style={{ fontSize: 13, color: "#6b7c85", lineHeight: 1.5, fontStyle: "italic" }}>Your message preview will appear here as you fill in the form on the left.</div>
+            </div>
+          ) : (
           <div style={{ background: "#1f2c33", borderRadius: "0 8px 8px 8px", overflow: "hidden", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
             {header?.format && ["image", "video", "document"].includes(header.format) && (
               <div style={{ height: header.format === "document" ? 56 : 150, background: "linear-gradient(135deg,#10202a,#15303a)", display: "grid", placeItems: "center", color: "#5b7682", fontSize: header.format === "document" ? 22 : 34, position: "relative" }}>
@@ -1105,6 +1126,7 @@ function Phone({ parts, ex }) {
             </div>
             {inlineBtns.length > 0 && <div style={{ borderTop: "1px solid #2a3942" }}>{inlineBtns.map((b, i) => <div key={i} style={{ padding: "9px 0", textAlign: "center", color: "#53bdeb", fontSize: 14, fontWeight: 500, borderTop: i === 0 ? "none" : "1px solid #2a3942", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>{b.type === "URL" ? "🔗" : b.type === "PHONE_NUMBER" ? "📞" : "⧉"} {b.text || "Button"}</div>)}</div>}
           </div>
+          )}
           {qrBtns.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 5 }}>{qrBtns.map((b, i) => <div key={i} style={{ background: "#1f2c33", borderRadius: 8, padding: "9px 0", textAlign: "center", color: "#53bdeb", fontSize: 14, fontWeight: 500, boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>{b.text || "Quick reply"}</div>)}</div>}
           {cards.length > 0 && <div style={{ display: "flex", gap: 8, marginTop: 8, overflowX: "auto", paddingBottom: 4 }}>{cards.map((card, i) => { const cp = tParse(card.components); return (
             <div key={i} style={{ flex: "0 0 180px", background: "#1f2c33", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
