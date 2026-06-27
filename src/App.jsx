@@ -28,6 +28,13 @@ const HEADER_TYPES = [["none", "None"], ["text", "Text"], ["image", "Image"], ["
 
 function hexA(hex, a) { const h = hex.replace("#", ""); const f = h.length === 3 ? h.split("").map((c) => c + c).join("") : h; const n = parseInt(f, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
 
+// Shared responsive hook — true on phones / narrow screens
+function useIsMobile(bp = 768) {
+  const [m, setM] = useState(typeof window !== "undefined" && window.innerWidth < bp);
+  useEffect(() => { const f = () => setM(window.innerWidth < bp); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, [bp]);
+  return m;
+}
+
 const GTYPE = {
   image: { icon: "🖼️", label: "Image", color: NC.text },
   video: { icon: "🎬", label: "Video", color: NC.question },
@@ -58,6 +65,10 @@ function injectFont() {
     document.head.appendChild(l);
   }
   document.body.style.margin = "0"; document.body.style.fontFamily = T.font;
+  if (!document.getElementById("cs-viewport")) {
+    const mvp = document.querySelector('meta[name="viewport"]');
+    if (!mvp) { const m = document.createElement("meta"); m.name = "viewport"; m.id = "cs-viewport"; m.content = "width=device-width, initial-scale=1, maximum-scale=1"; document.head.appendChild(m); }
+  }
 }
 function injectStyles() {
   if (document.getElementById("cs-dark")) return;
@@ -81,6 +92,8 @@ function injectStyles() {
   .cs-pub:hover{filter:brightness(1.07);}
   .cs-row:hover{background:#1A212D;}
   .cs-tcard:hover{border-color:#39455a!important;transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.4)!important;}
+  .no-scrollbar::-webkit-scrollbar{display:none;}
+  .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none;}
   `;
   document.head.appendChild(s);
 }
@@ -302,6 +315,7 @@ function Dashboard({ onEdit }) {
   const [confirmDel, setConfirmDel] = useState(null);
   const [pendingInbox, setPendingInbox] = useState({});
   const [msg, setMsg] = useState("");
+  const isMobile = useIsMobile();
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -323,16 +337,44 @@ function Dashboard({ onEdit }) {
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.font, color: T.text }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "24px 28px 12px" }}>
-        <div><div style={{ fontSize: 22, fontWeight: 700 }}>Chatbots</div><div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Manage your chatbots</div></div>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: isMobile ? "18px 16px 12px" : "24px 28px 12px", gap: 12, flexWrap: "wrap" }}>
+        <div><div style={{ fontSize: isMobile ? 19 : 22, fontWeight: 700 }}>Chatbots</div><div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Manage your chatbots</div></div>
         <div style={{ display: "flex", gap: 10 }}>
           <input ref={fileRef} type="file" accept="application/json" onChange={importBot} style={{ display: "none" }} />
           <button style={btnGhost} onClick={() => fileRef.current?.click()}>⬆ Import</button>
-          <button style={btnPrimary} onClick={createBot}>＋ Create Chatbot</button>
+          <button style={btnPrimary} onClick={createBot}>＋ {isMobile ? "Create" : "Create Chatbot"}</button>
         </div>
       </div>
       {msg && <div style={{ margin: "0 28px 8px", color: "#F87171", fontSize: 13 }}>{msg}</div>}
-      <div style={{ padding: "8px 28px 28px" }}>
+      <div style={{ padding: isMobile ? "8px 16px 28px" : "8px 28px 28px" }}>
+        {isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {flows === null && <div style={{ color: T.sub, fontSize: 13 }}>Loading…</div>}
+            {flows && flows.length === 0 && <div style={{ color: T.sub, fontSize: 13, padding: 8 }}>No chatbots yet. Tap "Create" to start.</div>}
+            {flows && flows.map((f) => {
+              const cur = f.inbox_id ?? ""; const sel = pendingInbox[f.id] !== undefined ? pendingInbox[f.id] : cur;
+              const dirty = pendingInbox[f.id] !== undefined && String(pendingInbox[f.id]) !== String(cur);
+              return (
+                <div key={f.id} style={{ background: T.soft, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+                    <span style={pill(f.status)}>{f.status}</span>
+                  </div>
+                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ width: "100%", padding: "9px 10px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: T.font, color: T.text, background: D.input, colorScheme: "dark", boxSizing: "border-box", marginBottom: 10 }}>
+                    <option value="">— None (off)</option>
+                    {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
+                  </select>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {dirty && <button onClick={() => saveInbox(f)} style={{ padding: "8px 12px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Save</button>}
+                    <button style={{ ...btnPrimary, flex: 1, justifyContent: "center" }} onClick={() => onEdit(f.id)}>Edit</button>
+                    <button onClick={() => duplicate(f)} style={btnGhost}>Copy</button>
+                    <button onClick={() => setConfirmDel(f)} style={{ ...btnGhost, color: "#F87171" }}>Delete</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 12 }}>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.6fr 1.1fr", padding: "12px 16px", background: T.soft, fontSize: 12, fontWeight: 600, color: T.sub, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: "12px 12px 0 0" }}>
             <div>Name</div><div>Status</div><div>Number / Inbox</div><div style={{ textAlign: "right" }}>Actions</div>
@@ -361,6 +403,7 @@ function Dashboard({ onEdit }) {
             );
           })}
         </div>
+        )}
       </div>
 
       {menuOpen && (() => {
@@ -375,8 +418,8 @@ function Dashboard({ onEdit }) {
       })()}
 
       {confirmDel && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={() => setConfirmDel(null)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#161C28", borderRadius: 12, padding: 24, width: 360, fontFamily: T.font, color: T.text, border: `1px solid ${T.border}` }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={() => setConfirmDel(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#161C28", borderRadius: 12, padding: 24, width: 360, maxWidth: "100%", fontFamily: T.font, color: T.text, border: `1px solid ${T.border}` }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Delete chatbot?</div>
             <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>"{confirmDel.name}" will be permanently deleted.</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
@@ -444,7 +487,7 @@ function Gallery() {
           </div>
         )}
         {media && list.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 16 }}>
             {list.map((m) => {
               const meta = GTYPE[m.type] || GTYPE.document; const name = m.original_name || m.filename || "file";
               return (
@@ -511,7 +554,7 @@ function MediaPicker({ onPick, onClose }) {
           {media === null && <div style={{ color: D.sub, fontSize: 14 }}>Loading…</div>}
           {media && list.length === 0 && <div style={{ color: D.sub, fontSize: 14, padding: "20px 0", textAlign: "center" }}>No media yet. Upload some in the Gallery first.</div>}
           {media && list.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 }}>
               {list.map((m) => { const meta = GTYPE[m.type] || GTYPE.document; const name = m.original_name || m.filename || "file"; return (
                 <div key={m.id} onClick={() => onPick(m)} className="cs-gcard" style={{ cursor: "pointer", background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, overflow: "hidden", transition: "transform .15s, border-color .15s" }}>
                   <div style={{ position: "relative", height: 104, background: D.input, display: "grid", placeItems: "center", overflow: "hidden" }}>
@@ -532,7 +575,7 @@ function MediaPicker({ onPick, onClose }) {
   );
 }
 
-// ===================== EDITOR (DARK) =====================
+// ===================== EDITOR (DARK) — mobile responsive =====================
 function Editor({ flowId, onBack }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([startNode()]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -547,6 +590,8 @@ function Editor({ flowId, onBack }) {
   const [tagOpen, setTagOpen] = useState(false);
   const [tagSearch, setTagSearch] = useState("");
   const [search, setSearch] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const isMobile = useIsMobile();
   const idRef = useRef(1);
   const rfRef = useRef(null);
   const wrapperRef = useRef(null);
@@ -571,6 +616,7 @@ function Editor({ flowId, onBack }) {
     }
     setNodes((nds) => [...nds, { id, type: kind, position, data: defaultData(kind) }]);
     setSelectedId(id);
+    if (isMobile) setPaletteOpen(false);
   };
   const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; };
   const onDrop = (e) => {
@@ -607,21 +653,34 @@ function Editor({ flowId, onBack }) {
   const curTags = selected && selected.type === "tag" ? (selected.data.labels || "").split(",").map((x) => x.trim()).filter(Boolean) : [];
   const toggleTag = (l) => { const next = curTags.includes(l) ? curTags.filter((x) => x !== l) : [...curTags, l]; updateData(selected.id, { labels: next.join(", ") }); };
 
+  // palette style: static sidebar on desktop, slide-in drawer on mobile
+  const paletteStyle = isMobile
+    ? { position: "fixed", top: 0, left: 0, bottom: 0, width: 248, maxWidth: "82vw", background: D.panel, borderRight: `1px solid ${D.border}`, padding: 12, overflowY: "auto", zIndex: 120, transform: paletteOpen ? "none" : "translateX(-110%)", transition: "transform .22s ease", boxShadow: paletteOpen ? "0 0 40px rgba(0,0,0,.6)" : "none" }
+    : { width: 222, background: D.panel, borderRight: `1px solid ${D.border}`, padding: 12, overflowY: "auto" };
+  // edit panel: side column on desktop, full-screen sheet on mobile
+  const panelStyle = isMobile
+    ? { position: "fixed", inset: 0, width: "100%", background: D.panel, padding: 16, overflowY: "auto", zIndex: 130 }
+    : { width: 304, background: D.panel, borderLeft: `1px solid ${D.border}`, padding: 16, overflowY: "auto" };
+
   return (
     <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", fontFamily: T.font, background: D.bg }}>
-      <div style={{ height: 56, background: D.panel, borderBottom: `1px solid ${D.border}`, display: "flex", alignItems: "center", padding: "0 16px", gap: 12 }}>
-        <button onClick={onBack} style={dGhost}>← Back</button>
-        <input className="cs-in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Chatbot name" style={{ borderRadius: 8, padding: "7px 10px", fontSize: 14, fontWeight: 600, fontFamily: T.font, minWidth: 200 }} />
-        <span style={{ fontSize: 12, color: D.sub }}>{status}</span>
+      <div style={{ minHeight: 56, background: D.panel, borderBottom: `1px solid ${D.border}`, display: "flex", alignItems: "center", padding: "8px 12px", gap: 10, flexWrap: "wrap" }}>
+        <button onClick={onBack} style={dGhost}>←{isMobile ? "" : " Back"}</button>
+        {isMobile && <button onClick={() => setPaletteOpen((v) => !v)} style={{ ...dGhost, fontWeight: 700 }}>＋ Nodes</button>}
+        <input className="cs-in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Chatbot name" style={{ borderRadius: 8, padding: "7px 10px", fontSize: 14, fontWeight: 600, fontFamily: T.font, minWidth: isMobile ? 110 : 200, flex: isMobile ? "1 1 110px" : "none" }} />
+        {!isMobile && <span style={{ fontSize: 12, color: D.sub }}>{status}</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           {flowStatus === "published" && <button onClick={unpublish} style={{ ...dGhost, color: D.sub }}>Unpublish</button>}
-          <button onClick={() => save(false)} style={dGhost}>Save Draft</button>
+          <button onClick={() => save(false)} style={dGhost}>{isMobile ? "Save" : "Save Draft"}</button>
           <button className="cs-pub" onClick={() => save(true)} style={{ padding: "7px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700 }}>Publish</button>
         </div>
+        {isMobile && <div style={{ flexBasis: "100%", fontSize: 11.5, color: D.sub }}>{status}</div>}
       </div>
 
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <div style={{ width: 222, background: D.panel, borderRight: `1px solid ${D.border}`, padding: 12, overflowY: "auto" }}>
+      <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
+        {isMobile && paletteOpen && <div onClick={() => setPaletteOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 110 }} />}
+        <div style={paletteStyle}>
+          {isMobile && <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}><div style={{ fontSize: 13, fontWeight: 700, color: D.text }}>Add a node</div><button onClick={() => setPaletteOpen(false)} style={{ marginLeft: "auto", width: 28, height: 28, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer" }}>✕</button></div>}
           <input className="cs-in" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search components…" style={{ width: "100%", padding: "8px 10px", borderRadius: 8, fontSize: 12.5, boxSizing: "border-box", fontFamily: T.font, marginBottom: 12 }} />
           {PALETTE.map((grp) => {
             const items = grp.items.filter((it) => !q || it.label.toLowerCase().includes(q));
@@ -638,21 +697,21 @@ function Editor({ flowId, onBack }) {
               </div>
             );
           })}
-          <div style={{ fontSize: 11, color: D.faint, marginTop: 10, lineHeight: 1.6 }}>Drag a node onto the canvas (or click to add), then connect the dots. Click the <b style={{ color: "#fb7185" }}>✕</b> on a line to remove a connection.</div>
+          <div style={{ fontSize: 11, color: D.faint, marginTop: 10, lineHeight: 1.6 }}>{isMobile ? "Tap a node to add it to the canvas, then connect the dots. Tap the ✕ on a line to remove a connection." : <>Drag a node onto the canvas (or click to add), then connect the dots. Click the <b style={{ color: "#fb7185" }}>✕</b> on a line to remove a connection.</>}</div>
         </div>
 
-        <div ref={wrapperRef} onDragOver={onDragOver} onDrop={onDrop} style={{ flex: 1, background: D.bg }}>
+        <div ref={wrapperRef} onDragOver={onDragOver} onDrop={onDrop} style={{ flex: 1, background: D.bg, minWidth: 0 }}>
           <EdgeCtx.Provider value={{ onDeleteEdge }}>
             <ReactFlow nodes={nodes} edges={edges} onInit={(inst) => { rfRef.current = inst; }} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { if (reopenGuard.current) return; setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (reopenGuard.current) return; if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
               <Background color="#1a2230" gap={20} size={1} />
-              <Controls />
-              <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || ACCENT} maskColor="rgba(7,10,16,.7)" />
+              {!isMobile && <Controls />}
+              {!isMobile && <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || ACCENT} maskColor="rgba(7,10,16,.7)" />}
             </ReactFlow>
           </EdgeCtx.Provider>
         </div>
 
         {selected && (
-          <div style={{ width: 304, background: D.panel, borderLeft: `1px solid ${D.border}`, padding: 16, overflowY: "auto" }}>
+          <div style={panelStyle}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: D.faint, textTransform: "uppercase", letterSpacing: ".06em" }}>Edit node</div>
               <button onClick={() => { reopenGuard.current = true; setSelectedId(null); setNodes((nds) => nds.map((n) => ({ ...n, selected: false }))); setTimeout(() => { reopenGuard.current = false; }, 300); }} title="Close" style={{ marginLeft: "auto", width: 30, height: 30, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 14 }}>✕</button>
@@ -730,7 +789,7 @@ function Editor({ flowId, onBack }) {
               <Tog on={!!selected.data.continueOnTimeout} onClick={() => updateData(selected.id, { continueOnTimeout: !selected.data.continueOnTimeout })} label="Continue on timeout" />
               <Hn>No timer = bot simply waits for a reply, then continues. With a timer: if no reply in time, it sends the timeout message and either continues (toggle on) or stops (toggle off).</Hn></Ed>)}
 
-            {selected.type === "delay" && (<Ed title="⏱️ Delay"><Lb>Wait</Lb><div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={1} value={selected.data.value || 1} onChange={(e) => updateData(selected.id, { value: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.unit || "seconds"} onChange={(v) => updateData(selected.id, { unit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div><Hn>Pauses the flow before the next step (max 5 minutes).</Hn></Ed>)}
+            {selected.type === "delay" && (<Ed title="⏱️ Delay"><Lb>Wait</Lb><div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={1} value={selected.data.value || 1} onChange={(e) => updateData(selected.id, { value: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.unit || "seconds"} onChange={(v) => updateData(selected.id, { unit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div><Hn>Pauses the flow before the next step.</Hn></Ed>)}
             {selected.type === "form" && (<Ed title="📝 Send Form">
               <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Bot asks each field one by one, saves every answer, then posts the filled form back in the chat (customer + agent both see it). Each answer is also reusable later as <b style={{ color: D.sub }}>{"{{key}}"}</b>.</div>
               <Lb>Intro message (optional)</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="Please fill this quick form:" />
@@ -822,9 +881,8 @@ function KeywordChips({ value, onChange }) {
 function Slider({ value, onChange }) { return (<input type="range" min={50} max={100} step={5} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: NC.start, cursor: "pointer" }} />); }
 function Tog({ on, onClick, label }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: "10px 0 2px" }}><div style={{ width: 34, height: 20, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} /></div><span style={{ fontSize: 12.5, color: D.text }}>{label}</span></div>); }
 // ════════════════════════════════════════════════════════════════════════════
-//  WHATSAPP TEMPLATES — full module (number dashboard → list → builder)
-//  Sharp modern UI. Uses only theme tokens (T/D/NC/ACCENT) + hexA already defined
-//  at the top of App.jsx. Self-contained; helper atoms are uniquely named.
+//  WHATSAPP TEMPLATES — table on desktop, cards on mobile (matches Chatbots UI)
+//  Uses theme tokens (T/D/NC/ACCENT) + hexA/copyText + useIsMobile from head.
 // ════════════════════════════════════════════════════════════════════════════
 
 const TPL_CATS = [
@@ -843,6 +901,8 @@ const TPL_LANGS2 = [
   ["gu", "Gujarati"], ["he", "Hebrew"], ["kn", "Kannada"], ["ml", "Malayalam"], ["mr", "Marathi"],
   ["pl", "Polish"], ["ro", "Romanian"], ["sv", "Swedish"], ["ta", "Tamil"], ["te", "Telugu"], ["uk", "Ukrainian"],
 ];
+const TPL_NUM_COLS = "1.5fr 1fr 1.25fr 1.4fr 0.8fr 1fr";
+const TPL_LIST_COLS = "1.7fr 1fr 1fr 0.65fr 1.8fr 1fr";
 
 function tStatus(s) {
   const x = String(s || "").toUpperCase();
@@ -877,86 +937,136 @@ function tMd(text) {
   return s;
 }
 function tFill(text, ex) { return String(text || "").replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => { const v = (ex || [])[parseInt(n, 10) - 1]; return v || "{{" + n + "}}"; }); }
+function tPlain(text) { return String(text || "").replace(/[*_~`]/g, "").replace(/\n+/g, " ").trim(); }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ROOT: number dashboard → templates list for the chosen number
-// ─────────────────────────────────────────────────────────────────────────────
+const tBtnPri = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 15px", background: T.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: T.font };
+const tBtnGhost = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: D.panel2, color: D.text, border: `1px solid ${D.border}`, borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 500, fontFamily: T.font };
+const tBtnIcon = { width: 36, height: 36, borderRadius: 8, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 15, fontFamily: T.font, display: "grid", placeItems: "center" };
+
+function Crumb({ items }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, marginBottom: 12, flexWrap: "wrap" }}>
+      {items.map((it, i) => (
+        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          {i > 0 && <span style={{ color: D.faint, opacity: .6 }}>›</span>}
+          <span onClick={it.onClick} style={{ cursor: it.onClick ? "pointer" : "default", color: it.active ? D.sub : D.faint, fontWeight: it.active ? 600 : 500 }}>{it.label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+function CopyCell({ value, mono }) {
+  const [done, setDone] = useState(false);
+  if (!value) return <span style={{ color: D.faint, fontSize: 12.5 }}>—</span>;
+  const show = String(value).length > 20 ? String(value).slice(0, 9) + "…" + String(value).slice(-7) : String(value);
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 7, maxWidth: "100%", minWidth: 0 }}>
+      <span title={String(value)} style={{ fontSize: 12.5, color: D.text, fontFamily: mono ? "monospace" : T.font, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{show}</span>
+      <button onClick={() => { if (copyText(String(value))) { setDone(true); setTimeout(() => setDone(false), 1200); } }} title="Copy"
+        style={{ flexShrink: 0, width: 24, height: 24, borderRadius: 6, border: `1px solid ${D.border}`, background: done ? hexA(NC.buttons, .16) : D.panel2, color: done ? "#4ade80" : D.sub, cursor: "pointer", fontSize: 11, display: "grid", placeItems: "center" }}>{done ? "✓" : "⧉"}</button>
+    </div>
+  );
+}
+
+// ── ROOT: number list → templates of the chosen number ──
 function Templates() {
-  const [inboxes, setInboxes] = useState(null);   // [{id,name,channel_type}]
-  const [picked, setPicked] = useState(null);      // chosen inbox object
+  const [inboxes, setInboxes] = useState(null);
+  const [picked, setPicked] = useState(null);
   const [err, setErr] = useState("");
+  const [syncKey, setSyncKey] = useState(0);
+  const isMobile = useIsMobile();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const j = await (await fetch(`${API}/api/inboxes?account_id=${ACCOUNT_ID}`)).json();
-        const wa = (j.inboxes || []).filter((i) => (i.channel_type || "").includes("Whatsapp") || (i.channel_type || "").includes("WhatsApp"));
-        const final = wa.length ? wa : (j.inboxes || []);
-        setInboxes(final);
-        // NOTE: we always show the number dashboard first (even for a single number)
-        // so the user clearly sees which WhatsApp number they're working on.
-      } catch { setInboxes([]); setErr("Couldn't load your WhatsApp numbers. Is the bot engine running?"); }
-    })();
-  }, []);
+  const loadInboxes = async () => {
+    setErr("");
+    try {
+      const j = await (await fetch(`${API}/api/inboxes?account_id=${ACCOUNT_ID}`)).json();
+      const wa = (j.inboxes || []).filter((i) => (i.channel_type || "").toLowerCase().includes("whatsapp"));
+      setInboxes(wa.length ? wa : (j.inboxes || []));
+    } catch { setInboxes([]); setErr("Couldn't load your WhatsApp numbers. Is the bot engine running?"); }
+  };
+  useEffect(() => { loadInboxes(); }, []);
 
   if (picked) return <TemplatesList inbox={picked} onBack={() => setPicked(null)} />;
 
-  // ── number-select dashboard ──
   return (
     <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
-      <TopBar title="Message Templates" subtitle="Pick a WhatsApp number to view & create its templates" icon="📨" />
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "26px 24px 50px" }}>
-        {err && <Bnr kind="err">{err}</Bnr>}
-        {inboxes === null && <div style={{ color: D.sub, fontSize: 14, padding: 30, textAlign: "center" }}>Loading numbers…</div>}
-        {inboxes && inboxes.length === 0 && (
-          <Empty icon="📞" title="No WhatsApp numbers found" sub="Connect a WhatsApp Cloud number in ChatsSync first, then come back to create templates." />
-        )}
-        {inboxes && inboxes.length > 0 && (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: D.faint }}>Your WhatsApp numbers</div>
-              <div style={{ fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 999, background: D.panel2, color: D.sub, border: `1px solid ${D.border}` }}>{inboxes.length}</div>
-              <div style={{ marginLeft: "auto", fontSize: 12, color: D.faint }}>Tap a number to manage templates</div>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isMobile ? "18px 16px 44px" : "22px 24px 50px" }}>
+        <Crumb items={[{ label: "Dashboard" }, { label: "Manage" }, { label: "WhatsApp Templates", active: true }]} />
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: isMobile ? 19 : 22, fontWeight: 700, letterSpacing: "-.01em" }}>WhatsApp Templates</div>
+            <div style={{ fontSize: 13, color: D.sub, marginTop: 3 }}>Manage message templates for each of your numbers</div>
+          </div>
+          <button className="cs-pub" onClick={() => { setInboxes(null); setSyncKey((k) => k + 1); loadInboxes(); }} style={tBtnGhost}>↻ Sync Numbers</button>
+        </div>
+
+        {err && <Bnr kind="err" onX={() => setErr("")}>{err}</Bnr>}
+
+        {inboxes === null && <div style={{ color: D.sub, fontSize: 13, padding: 40, textAlign: "center", border: `1px solid ${D.border}`, borderRadius: 12, background: D.card }}>Loading numbers…</div>}
+        {inboxes && inboxes.length === 0 && <Empty icon="📞" title="No WhatsApp numbers found" sub="Connect a WhatsApp Cloud number in ChatsSync first, then come back to create templates." />}
+
+        {inboxes && inboxes.length > 0 && (isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {inboxes.map((ib) => <NumberRow key={ib.id} inbox={ib} syncKey={syncKey} isMobile onManage={() => setPicked(ib)} />)}
+          </div>
+        ) : (
+          <div style={{ border: `1px solid ${D.border}`, borderRadius: 12, overflow: "hidden", background: D.card }}>
+            <div style={{ display: "grid", gridTemplateColumns: TPL_NUM_COLS, padding: "11px 18px", background: D.panel2, fontSize: 11.5, fontWeight: 700, color: D.sub, textTransform: "uppercase", letterSpacing: ".04em" }}>
+              <div>Verified Name</div><div>Business App</div><div>Phone Number</div><div>WABA ID</div><div style={{ textAlign: "center" }}>Templates</div><div style={{ textAlign: "right" }}>Actions</div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px,1fr))", gap: 14 }}>
-              {inboxes.map((ib) => <NumberCard key={ib.id} inbox={ib} onClick={() => setPicked(ib)} />)}
-            </div>
-          </>
-        )}
+            {inboxes.map((ib) => <NumberRow key={ib.id} inbox={ib} syncKey={syncKey} onManage={() => setPicked(ib)} />)}
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function NumberCard({ inbox, onClick }) {
+function NumberRow({ inbox, onManage, syncKey, isMobile }) {
   const [meta, setMeta] = useState(null);
   const [count, setCount] = useState(null);
   useEffect(() => {
-    (async () => { try { const j = await (await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (j.ok) setMeta(j); } catch {} })();
-    (async () => { try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (j.ok) setCount((j.templates || []).length); } catch {} })();
-  }, [inbox.id]);
-  return (
-    <div onClick={onClick} className="cs-tcard" style={{ cursor: "pointer", background: D.card, border: `1px solid ${D.border}`, borderRadius: 16, padding: 18, transition: "transform .14s, border-color .14s, box-shadow .14s" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-        <div style={{ width: 50, height: 50, borderRadius: 13, background: `linear-gradient(135deg, ${hexA(NC.buttons,.95)}, ${hexA("#13a884",.95)})`, display: "grid", placeItems: "center", fontSize: 24, flexShrink: 0, boxShadow: `0 6px 18px ${hexA(NC.buttons,.35)}` }}>💬</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: "-.01em" }}>{inbox.name}</div>
-          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{meta?.phone || "WhatsApp Cloud API"}</div>
+    let alive = true;
+    (async () => { try { const j = await (await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (alive && j.ok) setMeta(j); } catch {} })();
+    (async () => { try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json(); if (alive && j.ok) setCount((j.templates || []).length); } catch {} })();
+    return () => { alive = false; };
+  }, [inbox.id, syncKey]);
+
+  const dot = <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: meta ? "#34d399" : D.faint, boxShadow: meta ? "0 0 7px rgba(52,211,153,.6)" : "none" }} />;
+  const cloud = <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, background: hexA(ACCENT, .12), color: "#9ec1ff", border: `1px solid ${hexA(ACCENT, .25)}` }}>☁ Cloud API</span>;
+  const cnt = <span style={{ fontSize: 12.5, fontWeight: 700, color: count == null ? D.faint : D.text, padding: "2px 11px", borderRadius: 999, background: D.panel2, border: `1px solid ${D.border}` }}>{count == null ? "…" : count}</span>;
+
+  if (isMobile) {
+    return (
+      <div style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, padding: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 12 }}>
+          {dot}
+          <span title={inbox.name} style={{ fontSize: 15, fontWeight: 600, color: "#f0a868", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inbox.name}</span>
+          {cloud}
         </div>
-        <div style={{ width: 30, height: 30, borderRadius: 8, background: D.panel2, border: `1px solid ${D.border}`, display: "grid", placeItems: "center", fontSize: 15, color: D.sub }}>→</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 13 }}>
+          <Kv label="Phone"><CopyCell value={meta?.phone} /></Kv>
+          <Kv label="WABA ID"><CopyCell value={meta?.waba_id} mono /></Kv>
+          <Kv label="Templates">{cnt}</Kv>
+        </div>
+        <button className="cs-pub" onClick={onManage} style={{ ...tBtnPri, width: "100%", justifyContent: "center" }}>Manage Templates →</button>
       </div>
-      <div style={{ marginTop: 15, paddingTop: 14, borderTop: `1px solid ${D.border}`, display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: meta ? "#34d399" : D.faint, display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: meta ? "#34d399" : D.faint, boxShadow: meta ? "0 0 8px rgba(52,211,153,.6)" : "none" }} />{meta ? "Connected" : "Checking…"}</span>
-        {count !== null && <span style={{ fontSize: 11.5, fontWeight: 600, color: D.sub }}>· {count} template{count === 1 ? "" : "s"}</span>}
-        <span style={{ marginLeft: "auto", fontSize: 12.5, color: ACCENT, fontWeight: 700 }}>Manage →</span>
-      </div>
+    );
+  }
+  return (
+    <div className="cs-row" style={{ display: "grid", gridTemplateColumns: TPL_NUM_COLS, alignItems: "center", padding: "13px 18px", borderTop: `1px solid ${D.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>{dot}<span title={inbox.name} style={{ fontSize: 14, fontWeight: 600, color: "#f0a868", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inbox.name}</span></div>
+      <div>{cloud}</div>
+      <div style={{ minWidth: 0 }}><CopyCell value={meta?.phone} /></div>
+      <div style={{ minWidth: 0 }}><CopyCell value={meta?.waba_id} mono /></div>
+      <div style={{ textAlign: "center" }}>{cnt}</div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><button className="cs-pub" onClick={onManage} style={{ ...tBtnPri, padding: "7px 15px" }}>Manage →</button></div>
     </div>
   );
 }
+function Kv({ label, children }) { return (<div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 11, fontWeight: 700, color: D.faint, textTransform: "uppercase", letterSpacing: ".04em", minWidth: 78 }}>{label}</span><div style={{ minWidth: 0, flex: 1 }}>{children}</div></div>); }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  TEMPLATES LIST (per number)
-// ─────────────────────────────────────────────────────────────────────────────
+// ── TEMPLATES LIST (per number) ──
 function TemplatesList({ inbox, onBack }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState(""); const [msg, setMsg] = useState("");
@@ -964,9 +1074,10 @@ function TemplatesList({ inbox, onBack }) {
   const [editFrom, setEditFrom] = useState(null);
   const [viewTpl, setViewTpl] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
-  const [menuFor, setMenuFor] = useState(null);
+  const [menu, setMenu] = useState(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("all");
+  const isMobile = useIsMobile();
   const IID = inbox.id;
 
   const load = async () => {
@@ -977,7 +1088,7 @@ function TemplatesList({ inbox, onBack }) {
   useEffect(() => { load(); }, [IID]);
 
   const doDelete = async () => { const t = confirmDel; setConfirmDel(null); if (!t) return; try { const j = await (await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${IID}&name=${encodeURIComponent(t.name)}`, { method: "DELETE" })).json(); if (j.ok) { setMsg(`Deleted "${t.name}".`); load(); } else setErr(j.error || "Delete failed."); } catch { setErr("Delete failed."); } };
-  const dup = (t) => { setMenuFor(null); const p = tParse(t.components); setEditFrom({ name: t.name + "_copy", language: t.language, category: t.category, header: p.header, body: p.body, footer: p.footer, buttons: p.buttons, cards: p.cards }); setCreating(true); };
+  const dup = (t) => { setMenu(null); const p = tParse(t.components); setEditFrom({ name: t.name + "_copy", language: t.language, category: t.category, header: p.header, body: p.body, footer: p.footer, buttons: p.buttons, cards: p.cards }); setCreating(true); };
 
   if (creating) return <Builder inbox={inbox} prefill={editFrom} onClose={() => { setCreating(false); setEditFrom(null); }} onDone={() => { setCreating(false); setEditFrom(null); setMsg("Submitted to WhatsApp for review."); load(); }} />;
 
@@ -991,81 +1102,117 @@ function TemplatesList({ inbox, onBack }) {
     return true;
   });
 
+  const newBtn = <button className="cs-pub" onClick={() => { setMsg(""); setErr(""); setEditFrom(null); setCreating(true); }} style={tBtnPri}><span style={{ fontSize: 15 }}>＋</span> New Template</button>;
+
   return (
     <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
-      <TopBar title={inbox.name} subtitle="WhatsApp message templates" icon="📨" onBack={onBack}
-        right={<button className="cs-pub" onClick={() => { setMsg(""); setErr(""); setEditFrom(null); setCreating(true); }} style={btnGo()}><span style={{ fontSize: 16, marginRight: 3 }}>＋</span> New Template</button>}
-        extra={<button onClick={load} title="Refresh" style={btnSq()}>↻</button>} />
-
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 24px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        {tabs.map(([k, l]) => { const on = tab === k; return (
-          <button key={k} onClick={() => setTab(k)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${on ? hexA(ACCENT, .55) : D.border}`, background: on ? hexA(ACCENT, .14) : "transparent", color: on ? "#bdd4ff" : D.sub }}>
-            {l}<span style={{ fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, background: on ? hexA(ACCENT, .25) : D.panel2, color: on ? "#dbe7ff" : D.faint }}>{counts[k] ?? 0}</span>
-          </button>); })}
-        <input className="cs-in" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search templates…" style={{ marginLeft: "auto", padding: "8px 13px", borderRadius: 9, fontSize: 13, fontFamily: T.font, minWidth: 230 }} />
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isMobile ? "18px 16px 4px" : "22px 24px 4px" }}>
+        <Crumb items={[{ label: "Dashboard" }, { label: "Manage", onClick: onBack }, { label: inbox.name, onClick: onBack }, { label: "Templates", active: true }]} />
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+            <button onClick={onBack} style={tBtnIcon}>←</button>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: isMobile ? 18 : 21, fontWeight: 700, letterSpacing: "-.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inbox.name}</div>
+              <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>WhatsApp message templates</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={load} style={tBtnIcon} title="Refresh">↻</button>
+            {newBtn}
+          </div>
+        </div>
       </div>
 
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "8px 24px 44px" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isMobile ? "14px 16px 12px" : "16px 24px 12px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {tabs.map(([k, l]) => { const on = tab === k; return (
+          <button key={k} onClick={() => setTab(k)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${on ? hexA(ACCENT, .55) : D.border}`, background: on ? hexA(ACCENT, .14) : "transparent", color: on ? "#bdd4ff" : D.sub }}>
+            {l}<span style={{ fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, background: on ? hexA(ACCENT, .25) : D.panel2, color: on ? "#dbe7ff" : D.faint }}>{counts[k] ?? 0}</span>
+          </button>); })}
+        <input className="cs-in" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search templates…" style={{ marginLeft: isMobile ? 0 : "auto", width: isMobile ? "100%" : "auto", padding: "8px 13px", borderRadius: 8, fontSize: 13, fontFamily: T.font, minWidth: isMobile ? 0 : 230, boxSizing: "border-box" }} />
+      </div>
+
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isMobile ? "4px 16px 44px" : "4px 24px 44px" }}>
         {msg && <Bnr kind="ok" onX={() => setMsg("")}>{msg}</Bnr>}
         {err && <Bnr kind="err" onX={() => setErr("")}>{err}</Bnr>}
         {list === null && <div style={{ color: D.sub, fontSize: 14, padding: 30, textAlign: "center" }}>Loading templates…</div>}
-        {list && rows.length === 0 && <Empty icon="📋" title={list.length === 0 ? "No templates yet" : "Nothing matches"} sub={list.length === 0 ? "Create your first template and send it for approval." : "Try a different search or filter."} action={list.length === 0 ? <button className="cs-pub" onClick={() => setCreating(true)} style={btnGo()}><span style={{ fontSize: 16, marginRight: 3 }}>＋</span> New Template</button> : null} />}
+        {list && rows.length === 0 && <Empty icon="📋" title={list.length === 0 ? "No templates yet" : "Nothing matches"} sub={list.length === 0 ? "Create your first template and send it for approval." : "Try a different search or filter."} action={list.length === 0 ? newBtn : null} />}
 
-        {list && rows.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px,1fr))", gap: 16 }}>
-            {rows.map((t, i) => { const st = tStatus(t.status); const ct = tCat(t.category); const p = tParse(t.components); const car = p.cards.length;
+        {/* MOBILE: cards */}
+        {list && rows.length > 0 && isMobile && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+            {rows.map((t, i) => { const st = tStatus(t.status); const ct = tCat(t.category); const p = tParse(t.components); const car = p.cards.length; const plain = tPlain(p.body);
               return (
-                <div key={t.id || t.name + i} className="cs-tcard" style={{ position: "relative", background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", transition: "transform .14s, border-color .14s, box-shadow .14s" }}>
-                  <div style={{ height: 3, background: ct.c, opacity: .9 }} />
-                  <div style={{ padding: "14px 16px 0", display: "flex", alignItems: "flex-start", gap: 10 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.fg }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span>
-                        <span style={{ padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(ct.c, .14), color: ct.c, border: `1px solid ${hexA(ct.c, .3)}` }}>{ct.label}</span>
-                        <span style={{ fontSize: 11, color: D.faint, fontWeight: 700, textTransform: "uppercase" }}>{t.language}</span>
-                      </div>
-                    </div>
-                    <button onClick={() => setMenuFor(menuFor === (t.id || t.name) ? null : (t.id || t.name))} style={{ width: 30, height: 30, flexShrink: 0, border: `1px solid ${D.border}`, borderRadius: 8, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 16, lineHeight: "12px" }}>⋯</button>
+                <div key={t.id || t.name + i} style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, padding: 13 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 9 }}>
+                    <div onClick={() => setViewTpl(t)} style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, wordBreak: "break-word" }}>{t.name}</div>
+                    <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.fg }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span>
                   </div>
-                  <div onClick={() => setViewTpl(t)} style={{ margin: "12px 16px 14px", padding: "11px 13px", background: D.input, border: `1px solid ${D.border}`, borderRadius: 10, cursor: "pointer", minHeight: 58 }}>
-                    {p.header?.format && p.header.format !== "text" && <div style={{ fontSize: 11, color: D.faint, marginBottom: 5, display: "flex", alignItems: "center", gap: 5 }}>{p.header.format === "image" ? "🖼️" : p.header.format === "video" ? "🎬" : "📄"} {p.header.format}</div>}
-                    {p.header?.format === "text" && p.header.text && <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>{p.header.text}</div>}
-                    <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }} dangerouslySetInnerHTML={{ __html: tMd(p.body) || `<span style='color:${D.faint}'>No body</span>` }} />
-                    {(p.buttons.length || car) > 0 && <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {car > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: hexA(NC.list, .16), color: NC.list }}>🎠 {car} cards</span>}
-                      {p.buttons.slice(0, 3).map((b, k) => <span key={k} style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: hexA(ACCENT, .12), color: "#9ec1ff" }}>{b.type === "URL" ? "🔗" : b.type === "PHONE_NUMBER" ? "📞" : "↩"} {b.text}</span>)}
-                    </div>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 9, flexWrap: "wrap" }}>
+                    <span style={{ padding: "2px 9px", borderRadius: 7, fontSize: 11, fontWeight: 600, background: hexA(ct.c, .14), color: ct.c, border: `1px solid ${hexA(ct.c, .3)}` }}>{ct.label}</span>
+                    <span style={{ fontSize: 11, color: D.faint, fontWeight: 700, textTransform: "uppercase" }}>{t.language}</span>
+                    {p.header?.format && p.header.format !== "text" && <span style={{ fontSize: 12 }}>{p.header.format === "image" ? "🖼️" : p.header.format === "video" ? "🎬" : "📄"}</span>}
+                    {car > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 6, background: hexA(NC.list, .16), color: NC.list }}>🎠 {car}</span>}
                   </div>
-                  {menuFor === (t.id || t.name) && (<>
-                    <div onClick={() => setMenuFor(null)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                    <div style={{ position: "absolute", top: 48, right: 14, width: 168, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 11, boxShadow: "0 14px 34px rgba(0,0,0,.55)", zIndex: 50, padding: 5 }}>
-                      {[["👁  Preview", () => { setMenuFor(null); setViewTpl(t); }], ["⧉  Duplicate", () => dup(t)], ["↻  Refresh", () => { setMenuFor(null); load(); }]].map(([l, fn]) => <div key={l} className="cs-row" onClick={fn} style={{ padding: "9px 11px", fontSize: 12.5, cursor: "pointer", color: D.text, borderRadius: 7 }}>{l}</div>)}
-                      <div style={{ height: 1, background: D.border, margin: "5px 0" }} />
-                      <div className="cs-row" onClick={() => { setMenuFor(null); setConfirmDel(t); }} style={{ padding: "9px 11px", fontSize: 12.5, cursor: "pointer", color: "#fb7185", borderRadius: 7 }}>🗑  Delete</div>
-                    </div>
-                  </>)}
+                  <div onClick={() => setViewTpl(t)} style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.45, marginBottom: 11, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{plain || <span style={{ color: D.faint }}>No body text</span>}</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setViewTpl(t)} style={{ ...tBtnGhost, flex: 1, justifyContent: "center" }}>Preview</button>
+                    <button onClick={() => dup(t)} style={tBtnIcon} title="Duplicate">⧉</button>
+                    <button onClick={() => setConfirmDel(t)} style={{ ...tBtnIcon, color: "#fb7185", borderColor: hexA(NC.stop, .4) }} title="Delete">🗑</button>
+                  </div>
+                </div>
+              ); })}
+          </div>
+        )}
+
+        {/* DESKTOP: table */}
+        {list && rows.length > 0 && !isMobile && (
+          <div style={{ border: `1px solid ${D.border}`, borderRadius: 12, overflow: "hidden", background: D.card }}>
+            <div style={{ display: "grid", gridTemplateColumns: TPL_LIST_COLS, padding: "11px 18px", background: D.panel2, fontSize: 11.5, fontWeight: 700, color: D.sub, textTransform: "uppercase", letterSpacing: ".04em" }}>
+              <div>Name</div><div>Status</div><div>Category</div><div>Lang</div><div>Content</div><div style={{ textAlign: "right" }}>Actions</div>
+            </div>
+            {rows.map((t, i) => { const st = tStatus(t.status); const ct = tCat(t.category); const p = tParse(t.components); const car = p.cards.length; const plain = tPlain(p.body);
+              return (
+                <div key={t.id || t.name + i} className="cs-row" style={{ display: "grid", gridTemplateColumns: TPL_LIST_COLS, alignItems: "center", padding: "13px 18px", borderTop: `1px solid ${D.border}` }}>
+                  <div onClick={() => setViewTpl(t)} style={{ minWidth: 0, cursor: "pointer" }}><div title={t.name} style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div></div>
+                  <div><span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.fg }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span></div>
+                  <div><span style={{ padding: "2px 9px", borderRadius: 7, fontSize: 11, fontWeight: 600, background: hexA(ct.c, .14), color: ct.c, border: `1px solid ${hexA(ct.c, .3)}` }}>{ct.label}</span></div>
+                  <div style={{ fontSize: 11.5, color: D.faint, fontWeight: 700, textTransform: "uppercase" }}>{t.language}</div>
+                  <div onClick={() => setViewTpl(t)} style={{ minWidth: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+                    {p.header?.format && p.header.format !== "text" && <span style={{ fontSize: 12, flexShrink: 0 }}>{p.header.format === "image" ? "🖼️" : p.header.format === "video" ? "🎬" : "📄"}</span>}
+                    {car > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 6, background: hexA(NC.list, .16), color: NC.list, flexShrink: 0 }}>🎠 {car}</span>}
+                    <span style={{ fontSize: 12.5, color: D.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{plain || <span style={{ color: D.faint }}>No body</span>}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", alignItems: "center" }}>
+                    <button onClick={() => setViewTpl(t)} style={{ ...tBtnGhost, padding: "6px 13px" }}>Preview</button>
+                    <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu(menu && menu.id === (t.id || t.name) ? null : { id: t.id || t.name, x: r.right, y: r.bottom, tpl: t }); }} style={{ width: 30, height: 30, border: `1px solid ${D.border}`, borderRadius: 8, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 16, lineHeight: "12px" }}>⋯</button>
+                  </div>
                 </div>
               ); })}
           </div>
         )}
       </div>
 
+      {menu && (() => { const t = menu.tpl; return (<>
+        <div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
+        <div style={{ position: "fixed", top: menu.y + 6, left: Math.max(12, menu.x - 170), width: 170, background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 11, boxShadow: "0 14px 34px rgba(0,0,0,.55)", zIndex: 100, padding: 5 }}>
+          {[["👁  Preview", () => { setMenu(null); setViewTpl(t); }], ["⧉  Duplicate", () => dup(t)], ["↻  Refresh", () => { setMenu(null); load(); }]].map(([l, fn]) => <div key={l} className="cs-row" onClick={fn} style={{ padding: "9px 11px", fontSize: 12.5, cursor: "pointer", color: D.text, borderRadius: 7 }}>{l}</div>)}
+          <div style={{ height: 1, background: D.border, margin: "5px 0" }} />
+          <div className="cs-row" onClick={() => { setMenu(null); setConfirmDel(t); }} style={{ padding: "9px 11px", fontSize: 12.5, cursor: "pointer", color: "#fb7185", borderRadius: 7 }}>🗑  Delete</div>
+        </div>
+      </>); })()}
+
       {viewTpl && <PreviewModal tpl={viewTpl} onClose={() => setViewTpl(null)} onDup={() => { setViewTpl(null); dup(viewTpl); }} onDel={() => { setViewTpl(null); setConfirmDel(viewTpl); }} />}
       {confirmDel && (
         <Mdl onClose={() => setConfirmDel(null)} w={400}>
           <div style={{ fontWeight: 700, fontSize: 16.5, marginBottom: 8 }}>Delete "{confirmDel.name}"?</div>
           <div style={{ fontSize: 13, color: D.sub, marginBottom: 20, lineHeight: 1.5 }}>Removes the template from WhatsApp across all languages. Can't be undone.</div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button onClick={() => setConfirmDel(null)} style={btnGh()}>Cancel</button><button onClick={doDelete} style={{ ...btnGo(), background: "#dc2626", boxShadow: "none" }}>Delete</button></div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button onClick={() => setConfirmDel(null)} style={btnGh()}>Cancel</button><button onClick={doDelete} style={{ ...btnGo(), background: "#dc2626" }}>Delete</button></div>
         </Mdl>
       )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  PREVIEW MODAL
-// ─────────────────────────────────────────────────────────────────────────────
 function PreviewModal({ tpl, onClose, onDup, onDel }) {
   const p = tParse(tpl.components); const st = tStatus(tpl.status); const ct = tCat(tpl.category);
   return (
@@ -1075,7 +1222,7 @@ function PreviewModal({ tpl, onClose, onDup, onDel }) {
           <div style={{ fontSize: 17, fontWeight: 700, wordBreak: "break-word" }}>{tpl.name}</div>
           <div style={{ display: "flex", gap: 8, marginTop: 7, flexWrap: "wrap" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: st.bg, color: st.fg }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />{st.label}</span>
-            <span style={{ padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(ct.c, .14), color: ct.c }}>{ct.label}</span>
+            <span style={{ padding: "2px 9px", borderRadius: 7, fontSize: 11, fontWeight: 600, background: hexA(ct.c, .14), color: ct.c }}>{ct.label}</span>
             <span style={{ fontSize: 11, color: D.faint, fontWeight: 700, textTransform: "uppercase", alignSelf: "center" }}>{tpl.language}</span>
           </div>
         </div>
@@ -1088,9 +1235,6 @@ function PreviewModal({ tpl, onClose, onDup, onDel }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  WHATSAPP PHONE PREVIEW
-// ─────────────────────────────────────────────────────────────────────────────
 function Phone({ parts, ex }) {
   const { header, body, footer, buttons = [], cards = [] } = parts || {};
   const html = tMd(tFill(body, ex));
@@ -1098,8 +1242,7 @@ function Phone({ parts, ex }) {
   const qrBtns = buttons.filter((b) => b.type === "QUICK_REPLY");
   const isEmpty = !body && !header && buttons.length === 0 && cards.length === 0;
   return (
-    <div style={{ borderRadius: 20, padding: 12, background: "linear-gradient(160deg,#0b141a,#111b21)", border: `1px solid ${D.border}`, boxShadow: "0 8px 30px rgba(0,0,0,.35)" }}>
-      {/* WhatsApp top bar */}
+    <div style={{ borderRadius: 16, padding: 12, background: "linear-gradient(160deg,#0b141a,#111b21)", border: `1px solid ${D.border}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px 10px" }}>
         <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#2a3942,#1f2c33)", display: "grid", placeItems: "center", fontSize: 14, color: "#8696a0" }}>🏢</div>
         <div style={{ lineHeight: 1.2 }}><div style={{ fontSize: 12.5, fontWeight: 600, color: "#e9edef" }}>Your Business</div><div style={{ fontSize: 10, color: "#8696a0" }}>online</div></div>
@@ -1107,8 +1250,8 @@ function Phone({ parts, ex }) {
       <div style={{ borderRadius: 12, padding: "16px 12px", background: "repeating-linear-gradient(135deg, rgba(255,255,255,.012) 0 2px, transparent 2px 22px), #0b141a", minHeight: 90 }}>
         <div style={{ maxWidth: 300 }}>
           {isEmpty ? (
-            <div style={{ background: "#1f2c33", borderRadius: "0 8px 8px 8px", padding: "14px 13px", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
-              <div style={{ fontSize: 13, color: "#6b7c85", lineHeight: 1.5, fontStyle: "italic" }}>Your message preview will appear here as you fill in the form on the left.</div>
+            <div style={{ background: "#1f2c33", borderRadius: "0 8px 8px 8px", padding: "14px 13px" }}>
+              <div style={{ fontSize: 13, color: "#6b7c85", lineHeight: 1.5, fontStyle: "italic" }}>Your message preview will appear here as you fill in the form.</div>
             </div>
           ) : (
           <div style={{ background: "#1f2c33", borderRadius: "0 8px 8px 8px", overflow: "hidden", boxShadow: "0 1px 1px rgba(0,0,0,.25)" }}>
@@ -1139,11 +1282,9 @@ function Phone({ parts, ex }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  BUILDER (create / edit)
-// ─────────────────────────────────────────────────────────────────────────────
 function Builder({ inbox, onClose, onDone, prefill }) {
   const pf = prefill || {}; const IID = inbox.id;
+  const isMobile = useIsMobile();
   const [category, setCategory] = useState(pf.category || "MARKETING");
   const [language, setLanguage] = useState(pf.language || "en");
   const [name, setName] = useState(pf.name || "");
@@ -1173,7 +1314,6 @@ function Builder({ inbox, onClose, onDone, prefill }) {
   const nQR = buttons.filter((b) => b.type === "QUICK_REPLY").length, nU = buttons.filter((b) => b.type === "URL").length, nP = buttons.filter((b) => b.type === "PHONE_NUMBER").length;
   const addBtnT = (type) => { if (type === "QUICK_REPLY" && nQR >= 10) return; if (type === "URL" && nU >= 2) return; if (type === "PHONE_NUMBER" && nP >= 1) return; if (buttons.length >= 10) return; setButtons((b) => [...b, { type, text: "", url: "", phone_number: "" }]); };
   const setB = (i, p) => setButtons((b) => b.map((x, j) => (j === i ? { ...x, ...p } : x)));
-
   const addCard = () => { if (cards.length >= 10) return; setCards((c) => [...c, { header_type: c[0]?.header_type || "image", header_handle: "", header_name: "", body_text: "", buttons: [] }]); };
   const setCard = (i, p) => setCards((c) => c.map((x, j) => (j === i ? { ...x, ...p } : x)));
 
@@ -1200,28 +1340,28 @@ function Builder({ inbox, onClose, onDone, prefill }) {
 
   return (
     <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 20, background: `linear-gradient(180deg, ${D.panel2}, ${D.panel})`, borderBottom: `1px solid ${D.border}` }}>
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "13px 24px", display: "flex", alignItems: "center", gap: 14 }}>
-          <button onClick={onClose} style={btnGh()}>← Back</button>
-          <div><div style={{ fontSize: 15.5, fontWeight: 700 }}>{pf.name ? "Duplicate template" : "New template"}</div><div style={{ fontSize: 11.5, color: D.faint }}>{inbox.name}</div></div>
-          <div style={{ marginLeft: "auto" }}><button onClick={submit} disabled={submitting || uploading} className="cs-pub" style={{ ...btnGo(), opacity: submitting || uploading ? .6 : 1 }}>{submitting ? "Submitting…" : "Submit for review"}</button></div>
+      <div style={{ position: "sticky", top: 0, zIndex: 20, background: D.panel, borderBottom: `1px solid ${D.border}` }}>
+        <div style={{ maxWidth: 1180, margin: "0 auto", padding: isMobile ? "11px 16px" : "13px 24px", display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, flexWrap: "wrap" }}>
+          <button onClick={onClose} style={btnGh()}>←{isMobile ? "" : " Back"}</button>
+          <div style={{ minWidth: 0 }}><div style={{ fontSize: 15.5, fontWeight: 700 }}>{pf.name ? "Duplicate template" : "New template"}</div><div style={{ fontSize: 11.5, color: D.faint, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inbox.name}</div></div>
+          <div style={{ marginLeft: "auto" }}><button onClick={submit} disabled={submitting || uploading} className="cs-pub" style={{ ...btnGo(), opacity: submitting || uploading ? .6 : 1 }}>{submitting ? "Submitting…" : isMobile ? "Submit" : "Submit for review"}</button></div>
         </div>
       </div>
 
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "20px 24px 60px" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isMobile ? "16px 16px 60px" : "20px 24px 60px" }}>
         {error && <Bnr kind="err" onX={() => setError("")}>{error}</Bnr>}
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 360px", gap: 28, alignItems: "start" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 360px", gap: isMobile ? 18 : 28, alignItems: "start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18, order: isMobile ? 2 : 1 }}>
             <Crd title="Setup" icon="⚙️">
               <Fld label="Category">
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 9 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3,1fr)", gap: 9 }}>
                   {TPL_CATS.map(([v, l, sub, ic]) => { const on = category === v; const cm = tCat(v); return (
-                    <div key={v} onClick={() => setCategory(v)} style={{ cursor: "pointer", padding: "12px 11px", borderRadius: 11, border: `1.5px solid ${on ? cm.c : D.border}`, background: on ? hexA(cm.c, .1) : D.panel2 }}>
-                      <div style={{ fontSize: 18, marginBottom: 5 }}>{ic}</div><div style={{ fontSize: 13, fontWeight: 700, color: on ? cm.c : D.text }}>{l}</div><div style={{ fontSize: 10.5, color: D.faint, marginTop: 2, lineHeight: 1.3 }}>{sub}</div>
+                    <div key={v} onClick={() => setCategory(v)} style={{ cursor: "pointer", padding: "12px 11px", borderRadius: 10, border: `1.5px solid ${on ? cm.c : D.border}`, background: on ? hexA(cm.c, .1) : D.panel2, display: isMobile ? "flex" : "block", alignItems: "center", gap: 11 }}>
+                      <div style={{ fontSize: 18, marginBottom: isMobile ? 0 : 5 }}>{ic}</div><div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 700, color: on ? cm.c : D.text }}>{l}</div><div style={{ fontSize: 10.5, color: D.faint, marginTop: 2, lineHeight: 1.3 }}>{sub}</div></div>
                     </div>); })}
                 </div>
               </Fld>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
                 <Fld label="Language"><Slc value={language} onChange={setLanguage} options={TPL_LANGS2} /></Fld>
                 <Fld label="Template name"><Inp value={name} onChange={(v) => setName(v.toLowerCase().replace(/[^a-z0-9_]/g, "_"))} ph="order_confirmation" /></Fld>
               </div>
@@ -1232,7 +1372,7 @@ function Builder({ inbox, onClose, onDone, prefill }) {
               <Crd title="Authentication content" icon="🔐">
                 <div style={{ fontSize: 12.5, color: D.sub, lineHeight: 1.55, marginBottom: 14, padding: "10px 12px", background: hexA(NC.list, .08), border: `1px solid ${hexA(NC.list, .25)}`, borderRadius: 10 }}>WhatsApp inserts the code and copy button automatically. You only set the options below.</div>
                 <Tgl on={aSec} onClick={() => setASec(!aSec)} label='Add the security line ("do not share this code")' />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, marginTop: 12 }}>
                   <Fld label="Code expiry (min, optional)"><Inp value={aExp} onChange={(v) => setAExp(v.replace(/[^0-9]/g, ""))} ph="10" /></Fld>
                   <Fld label="Copy button text"><Inp value={aBtn} maxLength={25} onChange={setABtn} ph="Copy Code" /></Fld>
                 </div>
@@ -1243,7 +1383,7 @@ function Builder({ inbox, onClose, onDone, prefill }) {
                   <Crd title="Content" icon="✍️">
                     <Fld label="Header (optional)">
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {TPL_HDRS.map(([v, l, ic]) => { const on = hType === v; return <div key={v} onClick={() => { setHType(v); setHHandle(""); setHName(""); setHUrl(""); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, border: `1.5px solid ${on ? ACCENT : D.border}`, background: on ? hexA(ACCENT, .13) : D.panel2, color: on ? "#bdd4ff" : D.sub }}><span>{ic}</span>{l}</div>; })}
+                        {TPL_HDRS.map(([v, l, ic]) => { const on = hType === v; return <div key={v} onClick={() => { setHType(v); setHHandle(""); setHName(""); setHUrl(""); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: `1.5px solid ${on ? ACCENT : D.border}`, background: on ? hexA(ACCENT, .13) : D.panel2, color: on ? "#bdd4ff" : D.sub }}><span>{ic}</span>{l}</div>; })}
                       </div>
                       {hType === "text" && <div style={{ marginTop: 9 }}><Inp value={hText} maxLength={60} onChange={setHText} ph="Header text (max 60)" /></div>}
                       {isMedia && <div style={{ marginTop: 9 }}>
@@ -1310,7 +1450,7 @@ function Builder({ inbox, onClose, onDone, prefill }) {
             )}
           </div>
 
-          <div style={{ position: "sticky", top: 78 }}>
+          <div style={{ position: isMobile ? "static" : "sticky", top: 78, order: isMobile ? 1 : 2 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}><span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: D.faint }}>Live preview</span><span style={{ fontSize: 10.5, color: D.faint, marginLeft: "auto" }}>Updates as you type</span></div>
             <Phone parts={prev} ex={vars} />
             <div style={{ marginTop: 12, padding: "11px 13px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 11, fontSize: 11.5, color: D.sub, lineHeight: 1.55 }}><b style={{ color: D.text }}>Approval:</b> after submit, WhatsApp reviews (minutes–24h). You'll see <span style={{ color: "#fbbf24" }}>In review</span> → <span style={{ color: "#34d399" }}>Approved</span> or <span style={{ color: "#fb7185" }}>Rejected</span>. Approved templates show up in Campaigns.</div>
@@ -1337,29 +1477,17 @@ function CardBtns({ card, onChange }) {
   );
 }
 
-// ── shared sharp UI atoms (unique names) ──
-function TopBar({ title, subtitle, icon, onBack, right, extra }) {
-  return (
-    <div style={{ borderBottom: `1px solid ${D.border}`, background: `linear-gradient(180deg, ${D.panel2} 0%, ${D.panel} 100%)` }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 24px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        {onBack && <button onClick={onBack} style={{ ...btnSq(), width: 38, height: 38, fontSize: 17 }}>←</button>}
-        <div style={{ width: 42, height: 42, borderRadius: 11, background: `linear-gradient(135deg, ${hexA(NC.buttons, .9)}, ${hexA("#13a884", .9)})`, display: "grid", placeItems: "center", fontSize: 21, boxShadow: `0 6px 18px ${hexA(NC.buttons, .35)}`, flexShrink: 0 }}>{icon}</div>
-        <div style={{ minWidth: 0 }}><div style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div><div style={{ fontSize: 12.5, color: D.sub, marginTop: 1 }}>{subtitle}</div></div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>{extra}{right}</div>
-      </div>
-    </div>
-  );
-}
+// ── atoms (unique names) ──
 function Empty({ icon, title, sub, action }) {
-  return (<div style={{ border: `1px dashed ${D.border}`, borderRadius: 16, padding: "60px 24px", textAlign: "center", background: `radial-gradient(120% 100% at 50% 0%, ${hexA(NC.buttons, .05)}, transparent)` }}>
-    <div style={{ width: 60, height: 60, margin: "0 auto 16px", borderRadius: 16, background: D.panel2, border: `1px solid ${D.border}`, display: "grid", placeItems: "center", fontSize: 28 }}>{icon}</div>
+  return (<div style={{ border: `1px dashed ${D.border}`, borderRadius: 14, padding: "56px 24px", textAlign: "center", background: D.card }}>
+    <div style={{ width: 60, height: 60, margin: "0 auto 16px", borderRadius: 14, background: D.panel2, border: `1px solid ${D.border}`, display: "grid", placeItems: "center", fontSize: 28 }}>{icon}</div>
     <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 5 }}>{title}</div>
     <div style={{ fontSize: 13, color: D.sub, marginBottom: action ? 20 : 0 }}>{sub}</div>
     {action}
   </div>);
 }
 function Crd({ title, icon, right, children }) {
-  return (<div style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }}>
+  return (<div style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, overflow: "hidden" }}>
     <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 16px", borderBottom: `1px solid ${D.border}` }}><span style={{ fontSize: 15 }}>{icon}</span><span style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: "-.01em" }}>{title}</span><div style={{ marginLeft: "auto" }}>{right}</div></div>
     <div style={{ padding: 16 }}>{children}</div>
   </div>);
@@ -1367,14 +1495,15 @@ function Crd({ title, icon, right, children }) {
 function Fld({ label, children, tight }) { return (<div style={{ marginBottom: tight ? 10 : 16 }}><div style={{ fontSize: 12, fontWeight: 600, color: D.sub, marginBottom: 7 }}>{label}</div>{children}</div>); }
 function Hnt({ children }) { return <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
 function Bnr({ kind, children, onX }) { const ok = kind === "ok"; return (<div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16, padding: "11px 14px", borderRadius: 11, background: ok ? hexA(NC.buttons, .1) : hexA(NC.stop, .1), border: `1px solid ${ok ? hexA(NC.buttons, .35) : hexA(NC.stop, .35)}`, color: ok ? "#4ade80" : "#fda4af", fontSize: 13 }}><span style={{ flex: 1, lineHeight: 1.5 }}>{children}</span>{onX && <button onClick={onX} style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontSize: 14, opacity: .7 }}>✕</button>}</div>); }
-function Mdl({ children, onClose, w }) { return (<div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.66)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 16 }}><div onClick={(e) => e.stopPropagation()} style={{ width: w || 420, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", background: D.panel, border: `1px solid ${D.border}`, borderRadius: 16, padding: 22, fontFamily: T.font, boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>{children}</div></div>); }
+function Mdl({ children, onClose, w }) { return (<div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.66)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 16 }}><div onClick={(e) => e.stopPropagation()} style={{ width: w || 420, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, padding: 22, fontFamily: T.font, boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>{children}</div></div>); }
 function Tgl({ on, onClick, label, small }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}><div style={{ width: small ? 38 : 40, height: small ? 22 : 23, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? (small ? 18 : 19) : 2, width: small ? 18 : 19, height: small ? 18 : 19, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 3px rgba(0,0,0,.4)" }} /></div>{label && <span style={{ fontSize: 12.5, color: D.text, lineHeight: 1.4 }}>{label}</span>}</div>); }
 function Inp({ value, onChange, ph, maxLength }) { return (<input className="cs-in" value={value} placeholder={ph} maxLength={maxLength} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 11px", borderRadius: 8, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} />); }
 function Slc({ value, onChange, options }) { return (<select className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 11px", borderRadius: 8, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>{options.map(([v, l]) => <option key={v} value={v} style={{ background: D.panel2 }}>{l}</option>)}</select>); }
-const btnGo = () => ({ display: "inline-flex", alignItems: "center", gap: 5, padding: "9px 17px", background: "linear-gradient(135deg, #1db954 0%, #16A34A 100%)", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, boxShadow: "0 4px 14px rgba(22,163,74,.32)" });
-const btnGh = () => ({ padding: "8px 15px", borderRadius: 9, cursor: "pointer", fontSize: 13, fontFamily: T.font, fontWeight: 600, border: `1px solid ${D.border}`, background: D.panel2, color: D.text });
-const btnSq = () => ({ width: 36, height: 36, borderRadius: 9, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 15, fontFamily: T.font });
-const dash = (c) => ({ width: "100%", padding: "10px 12px", border: `1.5px dashed ${hexA(c, .6)}`, color: c, background: hexA(c, .07), borderRadius: 9, cursor: "pointer", fontFamily: T.font, fontSize: 12.5, fontWeight: 600 });
+
+const btnGo = () => ({ display: "inline-flex", alignItems: "center", gap: 5, padding: "9px 17px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font });
+const btnGh = () => ({ padding: "8px 15px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, fontWeight: 600, border: `1px solid ${D.border}`, background: D.panel2, color: D.text });
+const btnSq = () => ({ width: 36, height: 36, borderRadius: 8, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 15, fontFamily: T.font });
+const dash = (c) => ({ width: "100%", padding: "10px 12px", border: `1.5px dashed ${hexA(c, .6)}`, color: c, background: hexA(c, .07), borderRadius: 8, cursor: "pointer", fontFamily: T.font, fontSize: 12.5, fontWeight: 600 });
 const pill = (dis) => ({ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: T.font, border: `1px solid ${D.border}`, background: dis ? "transparent" : D.panel2, color: dis ? D.faint : D.text, cursor: dis ? "default" : "pointer", opacity: dis ? .5 : 1 });
 const xMini = () => ({ border: `1px solid ${hexA(NC.stop, .45)}`, color: "#fb7185", background: "transparent", borderRadius: 6, cursor: "pointer", padding: "3px 9px", fontFamily: T.font, fontSize: 11.5, fontWeight: 600 });
 // ════════════════════════════════════════════════════════════════════════════
