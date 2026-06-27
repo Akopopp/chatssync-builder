@@ -9,6 +9,27 @@ import "reactflow/dist/style.css";
 const params = new URLSearchParams(window.location.search);
 const API = (import.meta.env.VITE_API_URL || "https://bot.chatssync.online").replace(/\/$/, "");
 const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACCOUNT_ID || "3", 10);
+const CS_TOKEN = params.get("token") || "";
+// Attach the Chatwoot session token (+ account_id) to every bot-API request so the
+// server can verify the caller belongs to this account. Only rewrites calls to API.
+if (typeof window !== "undefined" && !window.__csFetchPatched) {
+  window.__csFetchPatched = true;
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    try {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      if (url && url.indexOf(API) === 0) {
+        const u = new URL(url, window.location.href);
+        if (CS_TOKEN && !u.searchParams.get("token")) u.searchParams.set("token", CS_TOKEN);
+        if (!u.searchParams.get("account_id")) u.searchParams.set("account_id", String(ACCOUNT_ID));
+        const newUrl = u.toString();
+        if (typeof input === "string") return _origFetch(newUrl, init);
+        return _origFetch(new Request(newUrl, input), init);
+      }
+    } catch (e) {}
+    return _origFetch(input, init);
+  };
+}
 
 // Light theme (DASHBOARD)
 const T = { blue: "#4C84FF", text: "#E8ECF3", sub: "#94A0B4", border: "#242C3A", bg: "#0B0F17", soft: "#161C28", green: "#3BD17F", greenBg: "rgba(46,166,107,.16)", grayPill: "#94A0B4", grayPillBg: "rgba(124,134,150,.16)", font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
