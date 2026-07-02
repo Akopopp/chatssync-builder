@@ -9,27 +9,6 @@ import "reactflow/dist/style.css";
 const params = new URLSearchParams(window.location.search);
 const API = (import.meta.env.VITE_API_URL || "https://bot.chatssync.online").replace(/\/$/, "");
 const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACCOUNT_ID || "3", 10);
-const CS_TOKEN = params.get("token") || "";
-// Attach the Chatwoot session token (+ account_id) to every bot-API request so the
-// server can verify the caller belongs to this account. Only rewrites calls to API.
-if (typeof window !== "undefined" && !window.__csFetchPatched) {
-  window.__csFetchPatched = true;
-  const _origFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    try {
-      const url = typeof input === "string" ? input : (input && input.url) || "";
-      if (url && url.indexOf(API) === 0) {
-        const u = new URL(url, window.location.href);
-        if (CS_TOKEN && !u.searchParams.get("token")) u.searchParams.set("token", CS_TOKEN);
-        if (!u.searchParams.get("account_id")) u.searchParams.set("account_id", String(ACCOUNT_ID));
-        const newUrl = u.toString();
-        if (typeof input === "string") return _origFetch(newUrl, init);
-        return _origFetch(new Request(newUrl, input), init);
-      }
-    } catch (e) {}
-    return _origFetch(input, init);
-  };
-}
 
 // Light theme (DASHBOARD)
 const T = { blue: "#4C84FF", text: "#E8ECF3", sub: "#94A0B4", border: "#242C3A", bg: "#0B0F17", soft: "#161C28", green: "#3BD17F", greenBg: "rgba(46,166,107,.16)", grayPill: "#94A0B4", grayPillBg: "rgba(124,134,150,.16)", font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
@@ -602,6 +581,7 @@ function Editor({ flowId, onBack }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedId, setSelectedId] = useState(null);
   const reopenGuard = useRef(false);
+  const lastTapRef = useRef({ id: null, t: 0 }); // mobile: detect double-tap to open editor (single tap just selects, so drag works)
   const [status, setStatus] = useState("Loading…");
   const [name, setName] = useState("");
   const [flowStatus, setFlowStatus] = useState("draft");
@@ -696,6 +676,7 @@ function Editor({ flowId, onBack }) {
           <button className="cs-pub" onClick={() => save(true)} style={{ padding: "7px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700 }}>Publish</button>
         </div>
         {isMobile && <div style={{ flexBasis: "100%", fontSize: 11.5, color: D.sub }}>{status}</div>}
+        {isMobile && <div style={{ flexBasis: "100%", fontSize: 11, color: D.faint, marginTop: -2 }}>👆 Drag a node to move it • Double-tap to edit</div>}
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
@@ -723,7 +704,7 @@ function Editor({ flowId, onBack }) {
 
         <div ref={wrapperRef} onDragOver={onDragOver} onDrop={onDrop} style={{ flex: 1, background: D.bg, minWidth: 0 }}>
           <EdgeCtx.Provider value={{ onDeleteEdge }}>
-            <ReactFlow nodes={nodes} edges={edges} onInit={(inst) => { rfRef.current = inst; }} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { if (reopenGuard.current) return; setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (reopenGuard.current) return; if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); }} fitView>
+            <ReactFlow nodes={nodes} edges={edges} onInit={(inst) => { rfRef.current = inst; }} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { if (reopenGuard.current) return; if (isMobile) { const now = Date.now(); const prev = lastTapRef.current; const isDouble = prev.id === n.id && now - prev.t < 500; lastTapRef.current = { id: n.id, t: now }; if (isDouble || selectedId === n.id) { setSelectedId(n.id); setTagOpen(false); } return; } setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (reopenGuard.current) return; if (isMobile) return; if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); lastTapRef.current = { id: null, t: 0 }; }} fitView>
               <Background color="#1a2230" gap={20} size={1} />
               {!isMobile && <Controls />}
               {!isMobile && <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || ACCENT} maskColor="rgba(7,10,16,.7)" />}
@@ -885,7 +866,42 @@ function Ed({ title, children }) { return (<div><div style={{ fontWeight: 700, m
 function Lb({ children }) { return <div style={{ fontSize: 12, fontWeight: 600, color: D.sub, margin: "10px 0 4px" }}>{children}</div>; }
 function Hn({ children }) { return <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
 function In({ value, onChange, placeholder, maxLength }) { return (<input className="cs-in" value={value} placeholder={placeholder} maxLength={maxLength} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} />); }
-function Ar({ value, onChange }) { return (<textarea className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} rows={4} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} />); }
+// Customer variables that can be inserted into any message. These are filled in live by the bot when it replies.
+const CHAT_VARS = [
+  { key: "senderName", label: "Name" },
+  { key: "senderId", label: "Number" },
+  { key: "message", label: "Their message" },
+  { key: "receiverId", label: "Your number" },
+];
+function Ar({ value, onChange, vars = true }) {
+  const ref = useRef(null);
+  const insertVar = (token) => {
+    const el = ref.current;
+    const cur = value || "";
+    let start = cur.length, end = cur.length;
+    if (el && typeof el.selectionStart === "number") { start = el.selectionStart; end = el.selectionEnd; }
+    const next = cur.slice(0, start) + token + cur.slice(end);
+    onChange(next);
+    // restore caret just after the inserted token
+    requestAnimationFrame(() => { if (el) { const pos = start + token.length; el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {} } });
+  };
+  return (
+    <div>
+      <textarea ref={ref} className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} rows={4} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} />
+      {vars && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 10.5, color: D.faint, marginRight: 2 }}>Insert:</span>
+          {CHAT_VARS.map((v) => (
+            <button key={v.key} type="button" title={`Insert {{${v.key}}} — filled with the customer's ${v.label.toLowerCase()}`} onClick={() => insertVar(`{{${v.key}}}`)}
+              style={{ fontSize: 10.5, fontWeight: 600, color: T.blue, background: "rgba(76,132,255,.12)", border: "1px solid rgba(76,132,255,.28)", borderRadius: 100, padding: "3px 9px", cursor: "pointer", fontFamily: T.font, lineHeight: 1.3 }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 function Sel({ value, onChange, options }) { return (<select className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>{options.map(([v, l]) => (<option key={v} value={v} style={{ background: D.panel2 }}>{l}</option>))}</select>); }
 function KeywordChips({ value, onChange }) {
   const [input, setInput] = useState("");
