@@ -85,7 +85,7 @@ function injectStyles() {
   .react-flow__handle{transition:transform .1s;}
   .react-flow__handle:hover{transform:scale(1.25);}
   .cs-pal:hover{border-color:#39455a!important;background:#1A212D!important;}
-  .cs-in{background:${D.input};border:1px solid #2A3340;color:${D.text};}
+  .cs-in{background:${D.input};border:1px solid #2A3340;color:${D.text};box-sizing:border-box;max-width:100%;}
   .cs-in:focus{outline:none;border-color:${ACCENT};box-shadow:0 0 0 3px ${hexA(ACCENT, .16)};}
   .cs-in::placeholder{color:${D.faint};}
   .cs-gcard:hover{border-color:#39455a!important;transform:translateY(-2px);}
@@ -205,7 +205,7 @@ function defaultData(kind) {
   if (kind === "delay") return { value: 1, unit: "seconds" };
   if (kind === "condition") return { match: "all", conditions: [{ first: "{{last_message}}", operator: "contains", second: "" }] };
   if (kind === "tag") return { labels: "" };
-  if (kind === "form") return { intro: "Please fill this quick form:", fields: [{ label: "Apna naam likhein", key: "naam" }, { label: "Phone number", key: "phone" }], submitMessage: "Shukriya! Hum jald rabta karenge 🙌" };
+  if (kind === "form") return { intro: "Please fill this quick form:", fields: [{ label: "Apna naam likhein", key: "naam", type: "text" }, { label: "Phone number", key: "phone", type: "text" }], submitMessage: "Shukriya! Hum jald rabta karenge 🙌" };
   if (kind === "stop") return { text: "Connecting you to an agent 🙌" };
   return {};
 }
@@ -251,7 +251,7 @@ function toEngineFormat(nodes, edges) {
     else if (n.type === "cta") def.nodes[n.id] = { type: "cta", header: hdr(d), body: d.body || "", display: d.display || "", url: d.url || "", footer: d.footer || "", next: nx(n.id) };
     else if (n.type === "delay") def.nodes[n.id] = { type: "delay", seconds: (d.unit === "minutes" ? (parseInt(d.value, 10) || 0) * 60 : (parseInt(d.value, 10) || 0)), next: nx(n.id) };
     else if (n.type === "tag") def.nodes[n.id] = { type: "tag", labels: (d.labels || "").split(",").map((x) => x.trim()).filter(Boolean), next: nx(n.id) };
-    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => ({ label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)) })), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: nx(n.id) };
+    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => { const base = { label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)), type: fd.type || "text" }; if (fd.type === "list" || fd.type === "buttons") base.options = (fd.options || []).filter((o) => (o.title || "").trim()).map((o) => ({ title: o.title })); return base; }), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: nx(n.id) };
     else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: d.text || "" };
     else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: nx(n.id) };
     else if (n.type === "condition") def.nodes[n.id] = { type: "condition", match: d.match || "all", conditions: (d.conditions || []).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })), next_true: condTrue[n.id] || null, next_false: condFalse[n.id] || null };
@@ -281,7 +281,7 @@ function fromEngineFormat(def) {
     if (kind === "question") { data.text = node.text || ""; data.saveAs = node.save_as || "answer"; data.responseFormat = node.response_format || "any"; const ts = node.timeout_seconds || 0; if (ts && ts % 60 === 0 && ts >= 60) { data.timeoutValue = ts / 60; data.timeoutUnit = "minutes"; } else { data.timeoutValue = ts; data.timeoutUnit = "seconds"; } data.timeoutMessage = node.timeout_message || ""; data.continueOnTimeout = !!node.continue_on_timeout; }
     if (kind === "condition") { data.match = node.match || "all"; data.conditions = (Array.isArray(node.conditions) && node.conditions.length ? node.conditions : [{ first: node.first || "{{last_message}}", operator: node.operator || "contains", second: node.second || "" }]).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })); }
     if (kind === "tag") data.labels = (node.labels || []).join(", ");
-    if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "" })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
+    if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "", type: "text" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })) })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
     if (kind === "buttons") { data.header = node.header || { type: "none", value: "" }; data.text = node.text || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
@@ -660,7 +660,7 @@ function Editor({ flowId, onBack }) {
     : { width: 222, background: D.panel, borderRight: `1px solid ${D.border}`, padding: 12, overflowY: "auto" };
   // edit panel: side column on desktop, full-screen sheet on mobile
   const panelStyle = isMobile
-    ? { position: "fixed", inset: 0, width: "100%", background: D.panel, padding: 16, overflowY: "auto", zIndex: 130 }
+    ? { position: "fixed", inset: 0, width: "100%", height: "100%", background: D.panel, padding: "max(12px, env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom))", overflowY: "auto", WebkitOverflowScrolling: "touch", zIndex: 130, boxSizing: "border-box" }
     : { width: 304, background: D.panel, borderLeft: `1px solid ${D.border}`, padding: 16, overflowY: "auto" };
 
   return (
@@ -714,9 +714,9 @@ function Editor({ flowId, onBack }) {
 
         {selected && (
           <div style={panelStyle}>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 14, ...(isMobile ? { position: "sticky", top: 0, background: D.panel, paddingBottom: 10, marginTop: -4, paddingTop: 4, zIndex: 5, borderBottom: `1px solid ${D.border}` } : {}) }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: D.faint, textTransform: "uppercase", letterSpacing: ".06em" }}>Edit node</div>
-              <button onClick={() => { reopenGuard.current = true; setSelectedId(null); setNodes((nds) => nds.map((n) => ({ ...n, selected: false }))); setTimeout(() => { reopenGuard.current = false; }, 300); }} title="Close" style={{ marginLeft: "auto", width: 30, height: 30, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: 14 }}>✕</button>
+              <button onClick={() => { reopenGuard.current = true; setSelectedId(null); setNodes((nds) => nds.map((n) => ({ ...n, selected: false }))); setTimeout(() => { reopenGuard.current = false; }, 300); }} title="Close" style={{ marginLeft: "auto", width: isMobile ? 38 : 30, height: isMobile ? 38 : 30, borderRadius: 8, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: isMobile ? 17 : 14, flexShrink: 0, display: "grid", placeItems: "center" }}>✕</button>
             </div>
 
             {selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><KeywordChips value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} /><Tog on={!!selected.data.fuzzy} onClick={() => updateData(selected.id, { fuzzy: !selected.data.fuzzy })} label="Enable fuzzy matching" />{selected.data.fuzzy && (<><Lb>Match sensitivity: {selected.data.sensitivity ?? 80}%</Lb><Slider value={selected.data.sensitivity ?? 80} onChange={(v) => updateData(selected.id, { sensitivity: v })} /><div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: D.faint, marginTop: 2 }}><span>Exact</span><span>Very loose</span></div></>)}<Hn>No keywords = starts on any message. With fuzzy OFF, only an exact match starts the bot. With fuzzy ON, close/partial matches start it, based on the sensitivity.</Hn></Ed>)}
@@ -793,21 +793,42 @@ function Editor({ flowId, onBack }) {
 
             {selected.type === "delay" && (<Ed title="⏱️ Delay"><Lb>Wait</Lb><div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={1} value={selected.data.value || 1} onChange={(e) => updateData(selected.id, { value: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.unit || "seconds"} onChange={(v) => updateData(selected.id, { unit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div><Hn>Pauses the flow before the next step.</Hn></Ed>)}
             {selected.type === "form" && (<Ed title="📝 Send Form">
-              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Bot asks each field one by one, saves every answer, then posts the filled form back in the chat (customer + agent both see it). Each answer is also reusable later as <b style={{ color: D.sub }}>{"{{key}}"}</b>.</div>
+              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Bot asks each field one by one, saves every answer, then posts the filled form back in the chat (customer + agent both see it). A field can be a typed answer, a tappable <b style={{ color: D.sub }}>list</b> (great for products), or <b style={{ color: D.sub }}>buttons</b>. Each answer is reusable later as <b style={{ color: D.sub }}>{"{{key}}"}</b>.</div>
               <Lb>Intro message (optional)</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="Please fill this quick form:" />
               <Lb>Fields</Lb>
-              {(selected.data.fields || []).map((fd, i) => (
+              {(selected.data.fields || []).map((fd, i) => {
+                const ftype = fd.type || "text";
+                const setField = (patch) => { const fs = [...selected.data.fields]; fs[i] = { ...fs[i], ...patch }; updateData(selected.id, { fields: fs }); };
+                const opts = fd.options || [];
+                const setOpt = (j, patch) => { const os = [...opts]; os[j] = { ...os[j], ...patch }; setField({ options: os }); };
+                return (
                 <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
-                  <Lb>Question {i + 1}</Lb><In value={fd.label} onChange={(v) => { const fs = [...selected.data.fields]; fs[i] = { ...fs[i], label: v }; updateData(selected.id, { fields: fs }); }} placeholder="e.g. Apni location batayein" />
-                  <div style={{ height: 6 }} /><Lb>Save as (one word)</Lb><In value={fd.key} onChange={(v) => { const fs = [...selected.data.fields]; fs[i] = { ...fs[i], key: v.replace(/\s+/g, "_") }; updateData(selected.id, { fields: fs }); }} placeholder="location" />
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    {[["text", "✏️ Text"], ["list", "📋 List"], ["buttons", "🔘 Buttons"]].map(([tv, tl]) => (
+                      <button key={tv} onClick={() => setField({ type: tv })} style={{ flex: 1, padding: "6px 0", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${ftype === tv ? NC.form : D.border}`, background: ftype === tv ? hexA(NC.form, .18) : D.input, color: ftype === tv ? "#5fe0d0" : D.sub }}>{tl}</button>
+                    ))}
+                  </div>
+                  <Lb>{ftype === "text" ? `Question ${i + 1}` : "Message / prompt"}</Lb><In value={fd.label} onChange={(v) => setField({ label: v })} placeholder={ftype === "list" ? "e.g. Apna order select karein" : ftype === "buttons" ? "e.g. Payment method?" : "e.g. Apni location batayein"} />
+                  <div style={{ height: 6 }} /><Lb>Save as (one word)</Lb><In value={fd.key} onChange={(v) => setField({ key: v.replace(/\s+/g, "_") })} placeholder={ftype === "list" ? "product" : ftype === "buttons" ? "payment" : "location"} />
+                  {(ftype === "list" || ftype === "buttons") && (<>
+                    <div style={{ height: 8 }} /><Lb>{ftype === "list" ? "List options (what they pick from)" : "Buttons (max 3)"}</Lb>
+                    {opts.map((op, j) => (
+                      <div key={j} style={{ display: "flex", gap: 5, marginBottom: 5, alignItems: "center" }}>
+                        <In value={op.title} onChange={(v) => setOpt(j, { title: v })} placeholder={ftype === "list" ? "e.g. Pizza — Rs 800" : "e.g. Cash"} />
+                        <button onClick={() => setField({ options: opts.filter((_, k) => k !== j) })} style={{ ...delMini, flexShrink: 0, width: 30, height: 30, padding: 0 }}>✕</button>
+                      </div>
+                    ))}
+                    {(ftype === "buttons" ? opts.length < 3 : opts.length < 10) && <button onClick={() => setField({ options: [...opts, { title: "" }] })} style={{ ...addBtn(NC.form), padding: "6px 0", fontSize: 11.5, marginTop: 2 }}>+ Add option</button>}
+                  </>)}
                   {(selected.data.fields || []).length > 1 && <button onClick={() => updateData(selected.id, { fields: selected.data.fields.filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove field</button>}
                 </div>
-              ))}
-              <button onClick={() => updateData(selected.id, { fields: [...(selected.data.fields || []), { label: "", key: "" }] })} style={addBtn(NC.form)}>+ Add Field</button>
+                );
+              })}
+              <button onClick={() => updateData(selected.id, { fields: [...(selected.data.fields || []), { label: "", key: "", type: "text" }] })} style={addBtn(NC.form)}>+ Add Field</button>
               <Lb>Message after submit (optional)</Lb><Ar value={selected.data.submitMessage || ""} onChange={(v) => updateData(selected.id, { submitMessage: v })} placeholder="Shukriya! Hum jald rabta karenge." />
               <Lb>Google Sheet link (optional — auto-saves every answer)</Lb><In value={selected.data.sheetUrl || ""} onChange={(v) => updateData(selected.id, { sheetUrl: v })} placeholder="https://docs.google.com/spreadsheets/d/..." />
               <div style={{ fontSize: 10.5, color: D.faint, marginTop: 4, lineHeight: 1.5 }}>Share the sheet with your bot's service email (Editor access). Each submission becomes a new row; columns are created automatically from the field keys.</div>
-              <Hn>Tip: keep “Save as” one word (location, phone, naam) so you can reuse it later as {"{{location}}"}.</Hn></Ed>)}
+              <Hn>Tip: keep “Save as” one word (product, location, phone) so you can reuse it later as {"{{product}}"}.</Hn></Ed>)}
 
             {selected.type === "condition" && (<Ed title="🔀 Condition">
               <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>If the check below is <b style={{ color: NC.buttons }}>true</b> → bot follows the <b style={{ color: NC.buttons }}>green</b> line. If <b style={{ color: NC.stop }}>false</b> → the <b style={{ color: NC.stop }}>red</b> line. By default it checks the customer's last message.</div>
