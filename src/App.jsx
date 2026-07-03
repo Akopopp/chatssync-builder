@@ -15,7 +15,7 @@ const T = { blue: "#4C84FF", text: "#E8ECF3", sub: "#94A0B4", border: "#242C3A",
 // Dark theme (CANVAS / EDITOR) — clean & professional
 const D = { bg: "#0B0F17", panel: "#0F141E", panel2: "#161C28", card: "#161C28", border: "#242C3A", text: "#E8ECF3", sub: "#94A0B4", faint: "#5C6878", input: "#0F1622" };
 // Muted, professional accent per node type
-const NC = { start: "#5B8DEF", text: "#4C84FF", buttons: "#2EA66B", list: "#9B6DF0", media: "#C8902B", cta: "#3A7DE0", question: "#4F90E8", delay: "#7C8696", condition: "#CC6A2E", tag: "#D9694A", form: "#2B9F94", stop: "#E5524A" };
+const NC = { start: "#5B8DEF", text: "#4C84FF", buttons: "#2EA66B", list: "#9B6DF0", media: "#C8902B", cta: "#3A7DE0", question: "#4F90E8", delay: "#7C8696", condition: "#CC6A2E", tag: "#D9694A", form: "#2B9F94", catalog: "#E0912B", stop: "#E5524A" };
 const ACCENT = "#4C84FF";
 
 const OPERATORS = [
@@ -180,7 +180,18 @@ function FormNode({ data, selected }) {
 }
 function StopNode({ data, selected }) { const a = NC.stop; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🛑" title="Stop Chatbot" /><div style={nbody}>{data.text || "(no message — hands over to a human)"}</div></div>); }
 
-const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, list: ListNode, media: MediaNode, cta: CtaNode, question: QuestionNode, delay: DelayNode, condition: ConditionNode, tag: TagNode, form: FormNode, stop: StopNode };
+function CatalogNode({ data, selected }) {
+  const a = NC.catalog; const products = (data.products || []).filter((p) => (p.name || "").trim());
+  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🛒" title="Product Cart" />
+    <div style={nbody}>{data.intro || "Show products, let customer build a cart"}</div>
+    <div style={{ padding: "0 13px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
+      {products.length ? products.slice(0, 6).map((p, i) => (<div key={i} style={{ fontSize: 11.5, color: D.text, display: "flex", gap: 6, alignItems: "center", justifyContent: "space-between" }}><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><span style={{ color: a, fontWeight: 700 }}>•</span> {p.name}</span><span style={{ color: D.faint, flexShrink: 0 }}>{p.price ? `Rs ${p.price}` : ""}</span></div>)) : <span style={{ fontSize: 12, color: D.faint }}>No products yet</span>}
+      {products.length > 6 && <span style={{ fontSize: 11, color: D.faint }}>+{products.length - 6} more…</span>}
+    </div>
+    <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
+}
+
+const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, list: ListNode, media: MediaNode, cta: CtaNode, question: QuestionNode, delay: DelayNode, condition: ConditionNode, tag: TagNode, form: FormNode, catalog: CatalogNode, stop: StopNode };
 
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }) {
   const { onDeleteEdge } = useContext(EdgeCtx) || {};
@@ -206,6 +217,7 @@ function defaultData(kind) {
   if (kind === "condition") return { match: "all", conditions: [{ first: "{{last_message}}", operator: "contains", second: "" }] };
   if (kind === "tag") return { labels: "" };
   if (kind === "form") return { intro: "Please fill this quick form:", fields: [{ label: "Apna naam likhein", key: "naam", type: "text" }, { label: "Phone number", key: "phone", type: "text" }], submitMessage: "Shukriya! Hum jald rabta karenge 🙌" };
+  if (kind === "catalog") return { intro: "🛒 Hamare products dekhein aur order karein:", products: [{ name: "Pizza", price: "800", desc: "Fresh & cheesy" }, { name: "Burger", price: "400", desc: "Beef patty" }], qtyOptions: "1,2,3,4,5", addMore: "➕ Aur add karein", checkout: "✅ Order complete karein", cartLine: "✅ {{item}} x{{qty}} (Rs {{lineTotal}}) cart mein add hua.\nAbhi tak total: Rs {{cartTotal}}", fields: [{ label: "Apni delivery location batayein 📍", key: "location", type: "text" }, { label: "Phone number?", key: "phone", type: "text" }], submitMessage: "Shukriya! Aapka order mil gaya 🙌 Hum jald rabta karenge." };
   if (kind === "stop") return { text: "Connecting you to an agent 🙌" };
   return {};
 }
@@ -218,6 +230,7 @@ const PALETTE = [
     { kind: "cta", label: "Send CTA", icon: "🔗", color: NC.cta },
     { kind: "question", label: "Ask Question", icon: "❓", color: NC.question },
     { kind: "form", label: "Send Form", icon: "📝", color: NC.form },
+    { kind: "catalog", label: "Product Cart", icon: "🛒", color: NC.catalog },
   ]},
   { group: "Logic", items: [
     { kind: "delay", label: "Delay", icon: "⏱️", color: NC.delay },
@@ -252,6 +265,7 @@ function toEngineFormat(nodes, edges) {
     else if (n.type === "delay") def.nodes[n.id] = { type: "delay", seconds: (d.unit === "minutes" ? (parseInt(d.value, 10) || 0) * 60 : (parseInt(d.value, 10) || 0)), next: nx(n.id) };
     else if (n.type === "tag") def.nodes[n.id] = { type: "tag", labels: (d.labels || "").split(",").map((x) => x.trim()).filter(Boolean), next: nx(n.id) };
     else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => { const base = { label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)), type: fd.type || "text" }; if (fd.type === "list" || fd.type === "buttons") base.options = (fd.options || []).filter((o) => (o.title || "").trim()).map((o) => ({ title: o.title })); return base; }), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: nx(n.id) };
+    else if (n.type === "catalog") def.nodes[n.id] = { type: "catalog", intro: d.intro || "", products: (d.products || []).filter((p) => (p.name || "").trim()).map((p) => ({ name: p.name || "", price: (String(p.price || "").replace(/[^\d.]/g, "")) || "0", desc: p.desc || "" })), qty_options: (d.qtyOptions || "1,2,3,4,5").split(",").map((x) => x.trim()).filter(Boolean), add_more_label: d.addMore || "➕ Aur add karein", checkout_label: d.checkout || "✅ Order complete karein", cart_line: d.cartLine || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => { const base = { label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)), type: fd.type || "text" }; if (fd.type === "list" || fd.type === "buttons") base.options = (fd.options || []).filter((o) => (o.title || "").trim()).map((o) => ({ title: o.title })); return base; }), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: nx(n.id) };
     else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: d.text || "" };
     else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: nx(n.id) };
     else if (n.type === "condition") def.nodes[n.id] = { type: "condition", match: d.match || "all", conditions: (d.conditions || []).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })), next_true: condTrue[n.id] || null, next_false: condFalse[n.id] || null };
@@ -282,6 +296,7 @@ function fromEngineFormat(def) {
     if (kind === "condition") { data.match = node.match || "all"; data.conditions = (Array.isArray(node.conditions) && node.conditions.length ? node.conditions : [{ first: node.first || "{{last_message}}", operator: node.operator || "contains", second: node.second || "" }]).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })); }
     if (kind === "tag") data.labels = (node.labels || []).join(", ");
     if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "", type: "text" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })) })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
+    if (kind === "catalog") { data.intro = node.intro || ""; data.products = (node.products && node.products.length ? node.products : [{ name: "", price: "", desc: "" }]).map((p) => ({ name: p.name || "", price: p.price || "", desc: p.desc || "" })); data.qtyOptions = (node.qty_options && node.qty_options.length ? node.qty_options.join(",") : "1,2,3,4,5"); data.addMore = node.add_more_label || "➕ Aur add karein"; data.checkout = node.checkout_label || "✅ Order complete karein"; data.cartLine = node.cart_line || ""; data.fields = (node.fields || []).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })) })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
     if (kind === "buttons") { data.header = node.header || { type: "none", value: "" }; data.text = node.text || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
@@ -829,6 +844,70 @@ function Editor({ flowId, onBack }) {
               <Lb>Google Sheet link (optional — auto-saves every answer)</Lb><In value={selected.data.sheetUrl || ""} onChange={(v) => updateData(selected.id, { sheetUrl: v })} placeholder="https://docs.google.com/spreadsheets/d/..." />
               <div style={{ fontSize: 10.5, color: D.faint, marginTop: 4, lineHeight: 1.5 }}>Share the sheet with your bot's service email (Editor access). Each submission becomes a new row; columns are created automatically from the field keys.</div>
               <Hn>Tip: keep “Save as” one word (product, location, phone) so you can reuse it later as {"{{product}}"}.</Hn></Ed>)}
+
+            {selected.type === "catalog" && (<Ed title="🛒 Product Cart">
+              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Customer sees your products as a list, picks one, chooses a quantity, and it's added to their cart. They can add more or checkout. After checkout the bot asks your follow-up questions, then posts the full order (all items + total + answers) in the chat.</div>
+              <Lb>Intro message</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="🛒 Hamare products dekhein aur order karein:" />
+
+              <Lb>Products</Lb>
+              {(selected.data.products || []).map((p, i) => {
+                const setP = (patch) => { const ps = [...selected.data.products]; ps[i] = { ...ps[i], ...patch }; updateData(selected.id, { products: ps }); };
+                return (
+                <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
+                  <Lb>Product name</Lb><In value={p.name} onChange={(v) => setP({ name: v })} placeholder="e.g. Chicken Pizza" />
+                  <div style={{ height: 6 }} /><Lb>Price (numbers only — system uses this to total)</Lb><In value={p.price} onChange={(v) => setP({ price: v.replace(/[^\d.]/g, "") })} placeholder="800" />
+                  <div style={{ height: 6 }} /><Lb>Details / description (optional)</Lb><In value={p.desc} onChange={(v) => setP({ desc: v })} placeholder="e.g. Large, cheese burst" />
+                  {(selected.data.products || []).length > 1 && <button onClick={() => updateData(selected.id, { products: selected.data.products.filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove product</button>}
+                </div>
+                );
+              })}
+              <button onClick={() => updateData(selected.id, { products: [...(selected.data.products || []), { name: "", price: "", desc: "" }] })} style={addBtn(NC.catalog)}>+ Add Product</button>
+
+              <div style={{ height: 14 }} />
+              <Lb>Quantity buttons (comma separated)</Lb><In value={selected.data.qtyOptions || "1,2,3,4,5"} onChange={(v) => updateData(selected.id, { qtyOptions: v })} placeholder="1,2,3,4,5" />
+              <Hn>These show as tappable buttons after a product is picked (max 10).</Hn>
+
+              <Lb>“Add more” button text</Lb><In value={selected.data.addMore || ""} onChange={(v) => updateData(selected.id, { addMore: v })} placeholder="➕ Aur add karein" />
+              <Lb>“Checkout” button text</Lb><In value={selected.data.checkout || ""} onChange={(v) => updateData(selected.id, { checkout: v })} placeholder="✅ Order complete karein" />
+
+              <Lb>Cart confirmation message</Lb><Ar value={selected.data.cartLine || ""} onChange={(v) => updateData(selected.id, { cartLine: v })} placeholder={"✅ {{item}} x{{qty}} (Rs {{lineTotal}}) cart mein add hua.\nAbhi tak total: Rs {{cartTotal}}"} vars={false} />
+              <div style={{ fontSize: 10.5, color: D.faint, marginTop: 4, lineHeight: 1.6 }}>Use <b style={{ color: D.sub }}>{"{{item}}"}</b> (product name), <b style={{ color: D.sub }}>{"{{qty}}"}</b> (quantity), <b style={{ color: D.sub }}>{"{{lineTotal}}"}</b> (this item's price), <b style={{ color: D.sub }}>{"{{cartTotal}}"}</b> (running total).</div>
+
+              <div style={{ height: 14 }} />
+              <Lb>After checkout — ask these questions</Lb>
+              {(selected.data.fields || []).map((fd, i) => {
+                const ftype = fd.type || "text";
+                const setField = (patch) => { const fs = [...(selected.data.fields || [])]; fs[i] = { ...fs[i], ...patch }; updateData(selected.id, { fields: fs }); };
+                const opts = fd.options || [];
+                const setOpt = (j, patch) => { const os = [...opts]; os[j] = { ...os[j], ...patch }; setField({ options: os }); };
+                return (
+                <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    {[["text", "✏️ Text"], ["list", "📋 List"], ["buttons", "🔘 Buttons"]].map(([tv, tl]) => (
+                      <button key={tv} onClick={() => setField({ type: tv })} style={{ flex: 1, padding: "6px 0", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${ftype === tv ? NC.catalog : D.border}`, background: ftype === tv ? hexA(NC.catalog, .18) : D.input, color: ftype === tv ? "#f0b968" : D.sub }}>{tl}</button>
+                    ))}
+                  </div>
+                  <Lb>{ftype === "text" ? `Question ${i + 1}` : "Message / prompt"}</Lb><In value={fd.label} onChange={(v) => setField({ label: v })} placeholder="e.g. Apni location batayein" />
+                  <div style={{ height: 6 }} /><Lb>Save as (one word)</Lb><In value={fd.key} onChange={(v) => setField({ key: v.replace(/\s+/g, "_") })} placeholder="location" />
+                  {(ftype === "list" || ftype === "buttons") && (<>
+                    <div style={{ height: 8 }} /><Lb>{ftype === "list" ? "List options" : "Buttons (max 3)"}</Lb>
+                    {opts.map((op, j) => (
+                      <div key={j} style={{ display: "flex", gap: 5, marginBottom: 5, alignItems: "center" }}>
+                        <In value={op.title} onChange={(v) => setOpt(j, { title: v })} placeholder="e.g. Cash" />
+                        <button onClick={() => setField({ options: opts.filter((_, k) => k !== j) })} style={{ ...delMini, flexShrink: 0, width: 30, height: 30, padding: 0 }}>✕</button>
+                      </div>
+                    ))}
+                    {(ftype === "buttons" ? opts.length < 3 : opts.length < 10) && <button onClick={() => setField({ options: [...opts, { title: "" }] })} style={{ ...addBtn(NC.catalog), padding: "6px 0", fontSize: 11.5, marginTop: 2 }}>+ Add option</button>}
+                  </>)}
+                  <button onClick={() => updateData(selected.id, { fields: (selected.data.fields || []).filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove question</button>
+                </div>
+                );
+              })}
+              <button onClick={() => updateData(selected.id, { fields: [...(selected.data.fields || []), { label: "", key: "", type: "text" }] })} style={addBtn(NC.catalog)}>+ Add Question</button>
+
+              <Lb>Message after order (optional)</Lb><Ar value={selected.data.submitMessage || ""} onChange={(v) => updateData(selected.id, { submitMessage: v })} placeholder="Shukriya! Aapka order mil gaya 🙌" />
+              <Lb>Google Sheet link (optional)</Lb><In value={selected.data.sheetUrl || ""} onChange={(v) => updateData(selected.id, { sheetUrl: v })} placeholder="https://docs.google.com/spreadsheets/d/..." />
+              <Hn>The full order (items, quantities, total) plus every answer is posted in the chat when the customer checks out.</Hn></Ed>)}
 
             {selected.type === "condition" && (<Ed title="🔀 Condition">
               <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>If the check below is <b style={{ color: NC.buttons }}>true</b> → bot follows the <b style={{ color: NC.buttons }}>green</b> line. If <b style={{ color: NC.stop }}>false</b> → the <b style={{ color: NC.stop }}>red</b> line. By default it checks the customer's last message.</div>
