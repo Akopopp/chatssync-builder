@@ -217,7 +217,7 @@ function defaultData(kind) {
   if (kind === "condition") return { match: "all", conditions: [{ first: "{{last_message}}", operator: "contains", second: "" }] };
   if (kind === "tag") return { labels: "" };
   if (kind === "form") return { intro: "Please fill this quick form:", fields: [{ label: "Apna naam likhein", key: "naam", type: "text" }, { label: "Phone number", key: "phone", type: "text" }], submitMessage: "Shukriya! Hum jald rabta karenge 🙌" };
-  if (kind === "catalog") return { intro: "🛒 Hamare products dekhein aur order karein:", products: [{ name: "Pizza", price: "800", desc: "Fresh & cheesy" }, { name: "Burger", price: "400", desc: "Beef patty" }], qtyOptions: "1,2,3,4,5", addMore: "➕ Aur add karein", checkout: "✅ Order complete karein", cartLine: "✅ {{item}} x{{qty}} (Rs {{lineTotal}}) cart mein add hua.\nAbhi tak total: Rs {{cartTotal}}", fields: [{ label: "Apni delivery location batayein 📍", key: "location", type: "text" }, { label: "Phone number?", key: "phone", type: "text" }], submitMessage: "Shukriya! Aapka order mil gaya 🙌 Hum jald rabta karenge." };
+  if (kind === "catalog") return { intro: "", products: [{ name: "Pizza", price: "800", desc: "Fresh & cheesy" }, { name: "Burger", price: "400", desc: "Beef patty" }], qtyOptions: "1,2,3,4,5,6,7,8,9,10", addMore: "➕ Add more", checkout: "✅ Confirm", cartLine: "🛒 *Aapka cart:*\n{{cart}}\n\n*Total: Rs {{cartTotal}}*", fields: [{ label: "Apni delivery location batayein 📍", key: "location", type: "text" }, { label: "Phone number?", key: "phone", type: "text" }], submitMessage: "Shukriya! Aapka order mil gaya 🙌 Hum jald rabta karenge." };
   if (kind === "stop") return { text: "Connecting you to an agent 🙌" };
   return {};
 }
@@ -296,7 +296,7 @@ function fromEngineFormat(def) {
     if (kind === "condition") { data.match = node.match || "all"; data.conditions = (Array.isArray(node.conditions) && node.conditions.length ? node.conditions : [{ first: node.first || "{{last_message}}", operator: node.operator || "contains", second: node.second || "" }]).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })); }
     if (kind === "tag") data.labels = (node.labels || []).join(", ");
     if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "", type: "text" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })) })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
-    if (kind === "catalog") { data.intro = node.intro || ""; data.products = (node.products && node.products.length ? node.products : [{ name: "", price: "", desc: "" }]).map((p) => ({ name: p.name || "", price: p.price || "", desc: p.desc || "" })); data.qtyOptions = (node.qty_options && node.qty_options.length ? node.qty_options.join(",") : "1,2,3,4,5"); data.addMore = node.add_more_label || "➕ Aur add karein"; data.checkout = node.checkout_label || "✅ Order complete karein"; data.cartLine = node.cart_line || ""; data.fields = (node.fields || []).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })) })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
+    if (kind === "catalog") { data.intro = node.intro || ""; data.products = (node.products && node.products.length ? node.products : [{ name: "", price: "", desc: "" }]).map((p) => ({ name: p.name || "", price: p.price || "", desc: p.desc || "" })); data.qtyOptions = (node.qty_options && node.qty_options.length ? node.qty_options.join(",") : "1,2,3,4,5,6,7,8,9,10"); data.addMore = node.add_more_label || "➕ Add more"; data.checkout = node.checkout_label || "✅ Confirm"; data.cartLine = node.cart_line || ""; data.fields = (node.fields || []).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })) })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
     if (kind === "buttons") { data.header = node.header || { type: "none", value: "" }; data.text = node.text || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
     let normSecs = null;
     if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
@@ -846,8 +846,8 @@ function Editor({ flowId, onBack }) {
               <Hn>Tip: keep “Save as” one word (product, location, phone) so you can reuse it later as {"{{product}}"}.</Hn></Ed>)}
 
             {selected.type === "catalog" && (<Ed title="🛒 Product Cart">
-              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Customer sees your products as a list, picks one, chooses a quantity, and it's added to their cart. They can add more or checkout. After checkout the bot asks your follow-up questions, then posts the full order (all items + total + answers) in the chat.</div>
-              <Lb>Intro message</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="🛒 Hamare products dekhein aur order karein:" />
+              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Your products go out as a numbered menu (1. Pizza — Rs 800…) — no limit on how many. The customer <b style={{ color: D.sub }}>types the number</b>, picks a quantity, and it's added to their cart. They can keep adding or confirm. After confirming, the bot asks your questions, then posts the full order (all items + total + answers).</div>
+              <Lb>Intro message (optional — sent before the product menu)</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="🛒 Welcome! Order karne ke liye niche dekhen:" />
 
               <Lb>Products</Lb>
               {(selected.data.products || []).map((p, i) => {
@@ -864,14 +864,15 @@ function Editor({ flowId, onBack }) {
               <button onClick={() => updateData(selected.id, { products: [...(selected.data.products || []), { name: "", price: "", desc: "" }] })} style={addBtn(NC.catalog)}>+ Add Product</button>
 
               <div style={{ height: 14 }} />
-              <Lb>Quantity buttons (comma separated)</Lb><In value={selected.data.qtyOptions || "1,2,3,4,5"} onChange={(v) => updateData(selected.id, { qtyOptions: v })} placeholder="1,2,3,4,5" />
-              <Hn>These show as tappable buttons after a product is picked (max 10).</Hn>
+              <Lb>Quantity buttons (comma separated, max 10)</Lb><In value={selected.data.qtyOptions || "1,2,3,4,5,6,7,8,9,10"} onChange={(v) => updateData(selected.id, { qtyOptions: v })} placeholder="1,2,3,4,5,6,7,8,9,10" />
+              <Hn>Tappable after a product is picked. Customer can also just type any number.</Hn>
 
-              <Lb>“Add more” button text</Lb><In value={selected.data.addMore || ""} onChange={(v) => updateData(selected.id, { addMore: v })} placeholder="➕ Aur add karein" />
-              <Lb>“Checkout” button text</Lb><In value={selected.data.checkout || ""} onChange={(v) => updateData(selected.id, { checkout: v })} placeholder="✅ Order complete karein" />
+              <Lb>“Add more” button text (max 20 characters)</Lb><In value={selected.data.addMore || ""} onChange={(v) => updateData(selected.id, { addMore: v.slice(0, 20) })} placeholder="➕ Add more" />
+              <Lb>“Confirm” button text (max 20 characters)</Lb><In value={selected.data.checkout || ""} onChange={(v) => updateData(selected.id, { checkout: v.slice(0, 20) })} placeholder="✅ Confirm" />
+              <Hn>WhatsApp rejects button titles longer than 20 characters — keep these short.</Hn>
 
-              <Lb>Cart confirmation message</Lb><Ar value={selected.data.cartLine || ""} onChange={(v) => updateData(selected.id, { cartLine: v })} placeholder={"✅ {{item}} x{{qty}} (Rs {{lineTotal}}) cart mein add hua.\nAbhi tak total: Rs {{cartTotal}}"} vars={false} />
-              <div style={{ fontSize: 10.5, color: D.faint, marginTop: 4, lineHeight: 1.6 }}>Use <b style={{ color: D.sub }}>{"{{item}}"}</b> (product name), <b style={{ color: D.sub }}>{"{{qty}}"}</b> (quantity), <b style={{ color: D.sub }}>{"{{lineTotal}}"}</b> (this item's price), <b style={{ color: D.sub }}>{"{{cartTotal}}"}</b> (running total).</div>
+              <Lb>Cart message (sent after every add)</Lb><Ar value={selected.data.cartLine || ""} onChange={(v) => updateData(selected.id, { cartLine: v })} placeholder={"🛒 *Aapka cart:*\n{{cart}}\n\n*Total: Rs {{cartTotal}}*"} vars={false} />
+              <div style={{ fontSize: 10.5, color: D.faint, marginTop: 4, lineHeight: 1.6 }}>Use <b style={{ color: D.sub }}>{"{{cart}}"}</b> (every item so far), <b style={{ color: D.sub }}>{"{{item}}"}</b> (just-added product), <b style={{ color: D.sub }}>{"{{qty}}"}</b>, <b style={{ color: D.sub }}>{"{{lineTotal}}"}</b>, <b style={{ color: D.sub }}>{"{{cartTotal}}"}</b> (running total).</div>
 
               <div style={{ height: 14 }} />
               <Lb>After checkout — ask these questions</Lb>
