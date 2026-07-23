@@ -185,9 +185,10 @@ function CatalogNode({ data, selected }) {
     <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
 }
 
-// ===== APPOINTMENT NODE =====
+// ===== APPOINTMENT NODE (WhatsApp Flow — no browser, no Google Calendar) =====
 function AppointmentNode({ data, selected }) {
   const a = NC.appointment;
+  const qs = (data.questions || []).filter((q) => (q.label || "").trim());
   return (
     <div style={nodeBox(a, selected)}>
       <Handle type="target" position={Position.Top} style={hStyle(a)} />
@@ -195,83 +196,211 @@ function AppointmentNode({ data, selected }) {
       <Hdr a={a} icon="📅" title="Book Appointment" />
       <div style={nbody}>
         <div style={{ marginBottom: 8 }}>{data.text || "Appointment book karein"}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, background: D.input, border: `1px solid ${D.border}` }}>
-          <span style={{ fontSize: 11 }}>🔗</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, background: D.input, border: `1px solid ${D.border}`, marginBottom: qs.length ? 8 : 0 }}>
+          <span style={{ fontSize: 11 }}>📲</span>
           <span style={{ fontSize: 11, color: a, fontWeight: 600 }}>{data.buttonText || "Book Appointment"}</span>
+          <span style={{ fontSize: 9.5, color: D.faint, marginLeft: "auto" }}>WhatsApp Flow</span>
         </div>
+        {qs.length > 0 && <div style={{ fontSize: 10.5, color: D.faint }}>{qs.length} question{qs.length > 1 ? "s" : ""} collected · synced to Google Sheet</div>}
       </div>
       <Handle type="source" position={Position.Bottom} style={hStyle(a)} />
     </div>
   );
 }
 
-// ===== CALENDAR SETTINGS COMPONENT (inside editor panel) =====
-function CalendarSettings({ accountId, ac }) {
+// ===== APPOINTMENT SETTINGS (account-level: slots + Google Sheet, no Calendar) =====
+function ApptSettings({ accountId, ac, questions, onQuestionsChange }) {
   const [cfg, setCfg] = useState(null);
   const [svcEmail, setSvcEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [msg, setMsg] = useState("");
+  const [showFlowJson, setShowFlowJson] = useState(false);
+  const [flowJson, setFlowJson] = useState("");
+  const [copiedJson, setCopiedJson] = useState(false);
+  const [inboxes, setInboxes] = useState([]);
+  const [flowInboxId, setFlowInboxId] = useState("");
+  const [wabaId, setWabaId] = useState("");
+  const [creatingFlow, setCreatingFlow] = useState(false);
+  const [flowMsg, setFlowMsg] = useState("");
+  const [flowStatus, setFlowStatus] = useState(null);
+
   useEffect(() => {
     (async () => {
       try {
-        const j = await (await fetch(`${API}/api/calendar/settings?account_id=${accountId}`)).json();
-        setCfg(j.settings || {}); setSvcEmail(j.service_email || "");
+        const j = await (await fetch(`${API}/api/appointments/settings?account_id=${accountId}`)).json();
+        setCfg(j.settings || {});
+        setWabaId(j.settings?.waba_id || "");
+        setFlowInboxId(j.settings?.flow_inbox_id ? String(j.settings.flow_inbox_id) : "");
       } catch { setCfg({}); }
+      try {
+        const j2 = await (await fetch(`${API}/api/appointments/service-email`)).json();
+        setSvcEmail(j2.service_email || "");
+      } catch {}
+      try {
+        const j3 = await (await fetch(`${API}/api/inboxes?account_id=${accountId}`)).json();
+        setInboxes(j3.inboxes || []);
+      } catch {}
+      try {
+        const j4 = await (await fetch(`${API}/api/appointments/flow-status?account_id=${accountId}`)).json();
+        if (j4.flow_id) setFlowStatus(j4);
+      } catch {}
     })();
   }, [accountId]);
-  const set = (k, v) => setCfg(p => ({ ...p, [k]: v }));
+
+  const set = (k, v) => setCfg((p) => ({ ...p, [k]: v }));
+
   const save = async () => {
     setSaving(true); setMsg("");
     try {
-      const j = await (await fetch(`${API}/api/calendar/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: accountId, ...cfg }) })).json();
+      const j = await (await fetch(`${API}/api/appointments/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: accountId, ...cfg, questions }) })).json();
       if (j.ok) { setMsg("✅ Saved!"); setTimeout(() => setMsg(""), 2500); } else setMsg("❌ " + (j.error || "Failed"));
     } catch { setMsg("❌ Save failed"); }
     setSaving(false);
   };
-  if (!cfg) return <div style={{ color: D.faint, fontSize: 12, padding: "8px 0" }}>Loading calendar settings…</div>;
+
+  const checkSheet = async () => {
+    if (!cfg?.sheet_url) { setMsg("❌ Paste a Google Sheet link first."); return; }
+    setChecking(true); setMsg("");
+    try {
+      const j = await (await fetch(`${API}/api/appointments/check-sheet`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheet_url: cfg.sheet_url }) })).json();
+      if (j.ok) { setMsg("✅ Connected! Bookings will be added as new rows."); if (j.service_email) setSvcEmail(j.service_email); }
+      else setMsg("❌ " + (j.error || "Couldn't connect"));
+    } catch { setMsg("❌ Couldn't reach the server."); }
+    setChecking(false);
+  };
+
+  const loadFlowJson = async () => {
+    setShowFlowJson(true);
+    try {
+      const j = await (await fetch(`${API}/api/appointments/flow-json?account_id=${accountId}`)).json();
+      setFlowJson(JSON.stringify(j.flow_json, null, 2));
+    } catch { setFlowJson("Couldn't load — check the server is reachable."); }
+  };
+
+  const createFlow = async () => {
+    if (!flowInboxId) { setFlowMsg("❌ Choose which WhatsApp number this Flow belongs to."); return; }
+    if (!wabaId.trim()) { setFlowMsg("❌ Paste this number's WhatsApp Business Account (WABA) ID first."); return; }
+    setCreatingFlow(true); setFlowMsg("");
+    try {
+      const j = await (await fetch(`${API}/api/appointments/create-flow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: accountId, inbox_id: flowInboxId, waba_id: wabaId.trim() }) })).json();
+      if (j.ok) { setFlowMsg("✅ Flow created & published for this number!"); setFlowStatus({ flow_id: j.flow_id, status: j.status }); }
+      else { setFlowMsg("❌ " + (j.error || "Failed")); if (j.flow_id) setFlowStatus({ flow_id: j.flow_id, status: "ERROR" }); }
+    } catch { setFlowMsg("❌ Couldn't reach the server."); }
+    setCreatingFlow(false);
+  };
+
+  if (!cfg) return <div style={{ color: D.faint, fontSize: 12, padding: "8px 0" }}>Loading appointment settings…</div>;
   const wdays = (cfg.working_days || "1,2,3,4,5").split(",").map(Number);
   const dayNames = [{ n: "Sun", v: 0 }, { n: "Mon", v: 1 }, { n: "Tue", v: 2 }, { n: "Wed", v: 3 }, { n: "Thu", v: 4 }, { n: "Fri", v: 5 }, { n: "Sat", v: 6 }];
+
   return (
     <div>
-      {svcEmail && (
-        <div style={{ marginBottom: 10, padding: "8px 10px", background: D.panel2, borderRadius: 8 }}>
-          <div style={{ fontSize: 10.5, color: D.faint, marginBottom: 4 }}>Share your Google Calendar with this email (Editor access):</div>
-          <div style={{ fontSize: 11, color: ac, fontWeight: 700, wordBreak: "break-all" }}>{svcEmail}</div>
+      <div style={{ marginBottom: 14 }}>
+        <Lb>Google Sheet link</Lb>
+        <In value={cfg.sheet_url || ""} onChange={(v) => set("sheet_url", v)} placeholder="https://docs.google.com/spreadsheets/d/..." />
+        {svcEmail && (
+          <div style={{ marginTop: 8, padding: "8px 10px", background: D.panel2, borderRadius: 8 }}>
+            <div style={{ fontSize: 10.5, color: D.faint, marginBottom: 4 }}>Share this Sheet with the service account (Editor access):</div>
+            <div style={{ fontSize: 11, color: ac, fontWeight: 700, wordBreak: "break-all" }}>{svcEmail}</div>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button onClick={checkSheet} disabled={checking} style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.text, fontSize: 12, fontWeight: 600, cursor: checking ? "default" : "pointer", fontFamily: T.font }}>{checking ? "Checking…" : "🔗 Test connection"}</button>
         </div>
-      )}
-      <Lb>Google Calendar ID</Lb>
-      <In value={cfg.calendar_id || ""} onChange={v => set("calendar_id", v)} placeholder="yourname@gmail.com" />
-      <Hn>Usually your Gmail address. Share your Google Calendar with the service email above giving it "Make changes to events" (Editor) permission.</Hn>
+        <Hn>Every completed booking is added as a new row here automatically — name, date, time, and each answer below, as its own column. No Google Calendar needed.</Hn>
+      </div>
+
       <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}><Lb>Start Time</Lb><In value={cfg.start_time || "09:00"} onChange={v => set("start_time", v)} placeholder="09:00" /></div>
-        <div style={{ flex: 1 }}><Lb>End Time</Lb><In value={cfg.end_time || "17:00"} onChange={v => set("end_time", v)} placeholder="17:00" /></div>
+        <div style={{ flex: 1 }}><Lb>Start Time</Lb><In value={cfg.start_time || "09:00"} onChange={(v) => set("start_time", v)} placeholder="09:00" /></div>
+        <div style={{ flex: 1 }}><Lb>End Time</Lb><In value={cfg.end_time || "17:00"} onChange={(v) => set("end_time", v)} placeholder="17:00" /></div>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}><Lb>Slot (min)</Lb><In value={String(cfg.slot_duration || 30)} onChange={v => set("slot_duration", v)} placeholder="30" /></div>
-        <div style={{ flex: 1 }}><Lb>Buffer (min)</Lb><In value={String(cfg.buffer_time || 0)} onChange={v => set("buffer_time", v)} placeholder="0" /></div>
+        <div style={{ flex: 1 }}><Lb>Slot (min)</Lb><In value={String(cfg.slot_duration || 30)} onChange={(v) => set("slot_duration", v)} placeholder="30" /></div>
+        <div style={{ flex: 1 }}><Lb>Buffer (min)</Lb><In value={String(cfg.buffer_time || 0)} onChange={(v) => set("buffer_time", v)} placeholder="0" /></div>
       </div>
       <Lb>Working Days</Lb>
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 4 }}>
-        {dayNames.map(d => {
+        {dayNames.map((d) => {
           const on = wdays.includes(d.v);
           return (
-            <button key={d.v} onClick={() => { const nx = on ? wdays.filter(x => x !== d.v) : [...wdays, d.v]; set("working_days", nx.sort().join(",")); }}
+            <button key={d.v} onClick={() => { const nx = on ? wdays.filter((x) => x !== d.v) : [...wdays, d.v]; set("working_days", nx.sort().join(",")); }}
               style={{ padding: "5px 9px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${on ? ac : D.border}`, background: on ? hexA(ac, .18) : D.input, color: on ? ac : D.sub }}>
               {d.n}
             </button>
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}><Lb>Advance Booking (days)</Lb><In value={String(cfg.advance_days || 14)} onChange={v => set("advance_days", v)} placeholder="14" /></div>
-        <div style={{ flex: 1 }}><Lb>Timezone</Lb><In value={cfg.timezone || "Asia/Karachi"} onChange={v => set("timezone", v)} placeholder="Asia/Karachi" /></div>
+      <Lb>Advance Booking (days)</Lb>
+      <In value={String(cfg.advance_days || 14)} onChange={(v) => set("advance_days", v)} placeholder="14" />
+      <Hn>Slots free/busy are tracked entirely inside the chatbot's own database — every booking made here blocks that slot instantly, no external calendar to sync.</Hn>
+
+      <div style={{ marginTop: 16 }}>
+        <Lb>Questions to ask the customer</Lb>
+        {(questions || []).map((q, i) => {
+          const setQ = (patch) => onQuestionsChange((questions || []).map((x, j) => (j === i ? { ...x, ...patch } : x)));
+          return (
+            <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
+              <Lb>Question {i + 1}</Lb>
+              <In value={q.label} onChange={(v) => setQ({ label: v })} placeholder="e.g. Apna naam likhein" />
+              <div style={{ height: 6 }} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ flex: 1 }}><Lb>Save as</Lb><In value={q.key} onChange={(v) => setQ({ key: v.replace(/\s+/g, "_") })} placeholder="naam" /></div>
+                <div style={{ flex: 1 }}>
+                  <Lb>Type</Lb>
+                  <select className="cs-in" value={q.input_type || "text"} onChange={(e) => setQ({ input_type: e.target.value })} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>
+                    <option value="text">Text</option><option value="number">Number</option><option value="email">Email</option><option value="phone">Phone</option>
+                  </select>
+                </div>
+              </div>
+              {(questions || []).length > 1 && <button onClick={() => onQuestionsChange(questions.filter((_, j) => j !== i))} style={{ marginTop: 8, width: "100%", padding: "6px 0", border: `1px solid ${hexA(NC.stop, .5)}`, color: "#fb7185", background: hexA(NC.stop, .08), borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: T.font }}>✕ Remove question</button>}
+            </div>
+          );
+        })}
+        <button onClick={() => onQuestionsChange([...(questions || []), { label: "", key: "", input_type: "text" }])} style={{ marginTop: 4, padding: "9px 12px", border: `1px dashed ${ac}`, color: ac, background: hexA(ac, .08), borderRadius: 8, cursor: "pointer", width: "100%", fontFamily: T.font, fontSize: 13, fontWeight: 600 }}>+ Add Question</button>
+        <Hn>Add as many as you like — each becomes a field in the WhatsApp Flow and a column in your Google Sheet. If you change these after the Flow is already published, hit "Create / Update Flow" again below to push the change.</Hn>
       </div>
-      <Lb>Appointment Title</Lb>
-      <In value={cfg.apt_title || "Appointment"} onChange={v => set("apt_title", v)} placeholder="Consultation" />
-      {msg && <div style={{ marginTop: 6, fontSize: 12, color: msg.startsWith("✅") ? "#4ade80" : "#F87171" }}>{msg}</div>}
+
+      {msg && <div style={{ marginTop: 10, fontSize: 12, color: msg.startsWith("✅") ? "#4ade80" : "#F87171" }}>{msg}</div>}
       <button onClick={save} disabled={saving} style={{ marginTop: 10, width: "100%", padding: "9px", borderRadius: 8, border: "none", background: ac, color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: T.font, cursor: saving ? "default" : "pointer", opacity: saving ? .7 : 1 }}>
-        {saving ? "Saving…" : "💾 Save Calendar Settings"}
+        {saving ? "Saving…" : "💾 Save Appointment Settings"}
       </button>
+
+      <div style={{ marginTop: 14, padding: "10px 12px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 9 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: D.text, marginBottom: 6 }}>⚙️ WhatsApp Flow for this number</div>
+        <div style={{ fontSize: 11, color: D.sub, lineHeight: 1.5, marginBottom: 10 }}>
+          Every WhatsApp number has its own separate Flow — one client's Flow can't be reused on another's number. Pick the number below and create it here; it uses that number's own WhatsApp credentials automatically.
+        </div>
+
+        <Lb>Which WhatsApp number</Lb>
+        <select className="cs-in" value={flowInboxId} onChange={(e) => setFlowInboxId(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>
+          <option value="">— choose a number —</option>
+          {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
+        </select>
+
+        <div style={{ height: 8 }} />
+        <Lb>WhatsApp Business Account (WABA) ID</Lb>
+        <In value={wabaId} onChange={setWabaId} placeholder="e.g. 1029384756123" />
+        <Hn>Found in Meta Business Suite → WhatsApp Manager → your number's account details. This is a one-time lookup per client.</Hn>
+
+        {flowStatus && (
+          <div style={{ marginTop: 10, padding: "7px 10px", background: D.input, borderRadius: 7, fontSize: 11, color: D.sub }}>
+            Current Flow: <span style={{ color: D.text, fontFamily: "monospace" }}>{flowStatus.flow_id}</span> · status: <span style={{ color: flowStatus.status === "PUBLISHED" ? "#4ade80" : flowStatus.status === "ERROR" ? "#fb7185" : "#fbbf24", fontWeight: 700 }}>{flowStatus.status || "unknown"}</span>
+          </div>
+        )}
+        {flowMsg && <div style={{ marginTop: 8, fontSize: 12, color: flowMsg.startsWith("✅") ? "#4ade80" : "#F87171" }}>{flowMsg}</div>}
+        <button onClick={createFlow} disabled={creatingFlow} style={{ marginTop: 10, width: "100%", padding: "9px", borderRadius: 8, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: T.font, cursor: creatingFlow ? "default" : "pointer", opacity: creatingFlow ? .7 : 1 }}>
+          {creatingFlow ? "Creating…" : flowStatus?.flow_id ? "🚀 Update & Republish Flow" : "🚀 Create & Publish Flow"}
+        </button>
+
+        <button onClick={loadFlowJson} style={{ marginTop: 8, padding: "7px 12px", borderRadius: 7, border: `1px solid ${D.border}`, background: D.input, color: D.text, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font, width: "100%" }}>📄 View raw Flow JSON (advanced / debugging)</button>
+        {showFlowJson && (
+          <div style={{ marginTop: 8 }}>
+            <textarea readOnly value={flowJson} rows={10} style={{ width: "100%", padding: 8, borderRadius: 7, fontSize: 10.5, fontFamily: "monospace", background: "#05070c", color: "#9ec1ff", border: `1px solid ${D.border}`, boxSizing: "border-box", resize: "vertical" }} />
+            <button onClick={() => { if (copyText(flowJson)) { setCopiedJson(true); setTimeout(() => setCopiedJson(false), 1500); } }} style={{ marginTop: 6, padding: "6px 12px", borderRadius: 7, border: `1px solid ${D.border}`, background: copiedJson ? hexA(NC.buttons, .16) : D.panel2, color: copiedJson ? "#4ade80" : D.text, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>{copiedJson ? "✓ Copied" : "⧉ Copy JSON"}</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -695,6 +824,7 @@ function Editor({ flowId, onBack }) {
   const [tagSearch, setTagSearch] = useState("");
   const [search, setSearch] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [apptQuestions, setApptQuestions] = useState([{ label: "Apna naam batayein", key: "naam", input_type: "text" }]);
   const isMobile = useIsMobile();
   const idRef = useRef(1);
   const rfRef = useRef(null);
@@ -706,6 +836,7 @@ function Editor({ flowId, onBack }) {
     })();
   }, [flowId]);
   useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/labels?account_id=${ACCOUNT_ID}`)).json(); setAllLabels(j.labels || []); } catch { setAllLabels([]); } })(); }, []);
+  useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/appointments/settings?account_id=${ACCOUNT_ID}`)).json(); const qs = j.settings?.questions; if (qs && qs.length) setApptQuestions(typeof qs === "string" ? JSON.parse(qs) : qs); } catch {} })(); }, []);
 
   const onConnect = useCallback((p) => setEdges((eds) => addEdge({ ...p, type: "deletable", animated: true }, eds)), [setEdges]);
   const onDeleteEdge = useCallback((id) => setEdges((es) => es.filter((e) => e.id !== id)), [setEdges]);
@@ -939,10 +1070,10 @@ function Editor({ flowId, onBack }) {
               <Lb>Message after order</Lb><Ar value={selected.data.submitMessage || ""} onChange={(v) => updateData(selected.id, { submitMessage: v })} placeholder="Shukriya! Aapka order mil gaya 🙌" />
               <Lb>Google Sheet link (optional)</Lb><In value={selected.data.sheetUrl || ""} onChange={(v) => updateData(selected.id, { sheetUrl: v })} placeholder="https://docs.google.com/spreadsheets/d/..." /></Ed>)}
 
-            {/* ===== APPOINTMENT EDITOR ===== */}
+            {/* ===== APPOINTMENT EDITOR — WhatsApp Flow, no browser, no Calendar ===== */}
             {selected.type === "appointment" && (<Ed title="📅 Book Appointment">
               <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>
-                Customer ko ek button milega. Tap karne par browser mein calendar page khulega — woh date aur slot choose karega. Booking complete hone par WhatsApp pe confirmation message aayega. Har account ka calendar alag hota hai — kisi ka data mix nahi hoga.
+                Customer ko ek button milega. Tap karne par WhatsApp ke andar hi ek native Flow screen khulega (browser bilkul nahi) — woh date+time slot aur tumhare neeche wale questions ke jawab dega. Submit hone par bot khud slot free hone ka check karega, booking save karega, aur turant tumhari Google Sheet mein row add ho jayegi.
               </div>
               <Lb>Message text</Lb>
               <Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} />
@@ -951,10 +1082,10 @@ function Editor({ flowId, onBack }) {
               <Lb>Footer (optional)</Lb>
               <In value={selected.data.footer || ""} maxLength={60} onChange={(v) => updateData(selected.id, { footer: v })} placeholder="We'll confirm on WhatsApp" />
               <div style={{ marginTop: 16, padding: 12, background: hexA(NC.appointment, .07), border: `1px solid ${hexA(NC.appointment, .3)}`, borderRadius: 10 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: NC.appointment, marginBottom: 12 }}>⚙️ Calendar Settings (This Account)</div>
-                <CalendarSettings accountId={ACCOUNT_ID} ac={NC.appointment} />
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: NC.appointment, marginBottom: 12 }}>⚙️ Appointment Settings (This Account)</div>
+                <ApptSettings accountId={ACCOUNT_ID} ac={NC.appointment} questions={apptQuestions} onQuestionsChange={setApptQuestions} />
               </div>
-              <Hn>Calendar settings are saved per account. Every ChatsSync customer has their own separate calendar — no data mixing.</Hn>
+              <Hn>Slots, Sheet link and Questions are shared across every "Book Appointment" node in this account. The WhatsApp Flow itself is created separately per WhatsApp number below, since each number has its own Meta account.</Hn>
             </Ed>)}
 
             {selected.type === "condition" && (<Ed title="🔀 Condition">
@@ -1045,7 +1176,7 @@ function KeywordChips({ value, onChange }) {
 function Slider({ value, onChange }) { return (<input type="range" min={50} max={100} step={5} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: NC.start, cursor: "pointer" }} />); }
 function Tog({ on, onClick, label }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: "10px 0 2px" }}><div style={{ width: 34, height: 20, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} /></div><span style={{ fontSize: 12.5, color: D.text }}>{label}</span></div>); }
 
-// Templates section (keeping existing code intact)
+// Templates section (kept intact — unrelated to appointments)
 const TPL_CATS = [["MARKETING","Marketing","Promos, offers & news","📣"],["UTILITY","Utility","Order & account updates","🧾"],["AUTHENTICATION","Authentication","One-time passcodes","🔐"]];
 const TPL_HDRS = [["none","None","⊘"],["text","Text","T"],["image","Image","🖼️"],["video","Video","🎬"],["document","Document","📄"]];
 const TPL_LANGS2 = [["en","English"],["en_US","English (US)"],["en_GB","English (UK)"],["ur","Urdu"],["hi","Hindi"],["ar","Arabic"],["bn","Bengali"],["pa","Punjabi"],["es","Spanish"],["es_MX","Spanish (MX)"],["pt_BR","Portuguese (BR)"],["fr","French"],["de","German"],["it","Italian"],["nl","Dutch"],["ru","Russian"],["tr","Turkish"],["id","Indonesian"],["ms","Malay"],["fil","Filipino"],["th","Thai"],["vi","Vietnamese"],["zh_CN","Chinese (CN)"],["ja","Japanese"],["ko","Korean"],["fa","Persian"],["ps","Pashto"],["af","Afrikaans"],["ar_EG","Arabic (EG)"],["el","Greek"],["gu","Gujarati"],["he","Hebrew"],["kn","Kannada"],["ml","Malayalam"],["mr","Marathi"],["pl","Polish"],["ro","Romanian"],["sv","Swedish"],["ta","Tamil"],["te","Telugu"],["uk","Ukrainian"]];
