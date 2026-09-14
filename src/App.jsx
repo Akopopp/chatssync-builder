@@ -10,8 +10,72 @@ const params = new URLSearchParams(window.location.search);
 const API = (import.meta.env.VITE_API_URL || "https://bot.chatssync.online").replace(/\/$/, "");
 const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACCOUNT_ID || "3", 10);
 
-const T = { blue: "#4C84FF", text: "#E8ECF3", sub: "#94A0B4", border: "#242C3A", bg: "#0B0F17", soft: "#161C28", green: "#3BD17F", greenBg: "rgba(46,166,107,.16)", grayPill: "#94A0B4", grayPillBg: "rgba(124,134,150,.16)", font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
-const D = { bg: "#0B0F17", panel: "#0F141E", panel2: "#161C28", card: "#161C28", border: "#242C3A", text: "#E8ECF3", sub: "#94A0B4", faint: "#5C6878", input: "#0F1622" };
+/* ===== THEME =====
+   PEHLE in dono object mein rang pakke hex likhe the, isi liye builder
+   hamesha dark rehta tha — light mode tha hi nahi.
+   Ab ye CSS variables par hain. Faida: neeche ki 1200 lines mein jahan
+   jahan D.card / T.text waghera likha hai, woh ek lafz bhi nahi badla —
+   inline style mein var() bilkul theek chalta hai.
+   Accent rang (ACCENT, NC, green, blue) jaan-boojh kar hex hi rahe:
+   woh dono theme mein chalte hain, aur hexA() unpar hisaab karta hai. */
+const T = { blue: "#4C84FF", text: "var(--cs-text)", sub: "var(--cs-sub)", border: "var(--cs-border)", bg: "var(--cs-bg)", soft: "var(--cs-soft)", green: "#3BD17F", greenBg: "rgba(46,166,107,.16)", grayPill: "var(--cs-sub)", grayPillBg: "rgba(124,134,150,.16)", font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
+const D = { bg: "var(--cs-bg)", panel: "var(--cs-panel)", panel2: "var(--cs-panel2)", card: "var(--cs-card)", border: "var(--cs-border)", text: "var(--cs-text)", sub: "var(--cs-sub)", faint: "var(--cs-faint)", input: "var(--cs-input)" };
+
+function csInjectThemeVars() {
+  if (document.getElementById("cs-theme-vars")) return;
+  const s = document.createElement("style");
+  s.id = "cs-theme-vars";
+  s.textContent = `
+  :root{
+    --cs-bg:#0B0F17; --cs-panel:#0F141E; --cs-panel2:#161C28; --cs-card:#161C28;
+    --cs-border:#242C3A; --cs-border2:#39455A; --cs-inborder:#2A3340;
+    --cs-text:#E8ECF3; --cs-sub:#94A0B4; --cs-faint:#5C6878;
+    --cs-input:#0F1622; --cs-soft:#161C28; --cs-hover:#1A212D;
+    --cs-ctrl-hover:#1C2433; --cs-ctrl-ico:#AEB8C8; --cs-edge:#3B4658;
+    --cs-attr:#3A4350; --cs-scheme:dark;
+  }
+  :root.cs-light{
+    --cs-bg:#F3F6F9; --cs-panel:#FFFFFF; --cs-panel2:#FFFFFF; --cs-card:#FFFFFF;
+    --cs-border:#DCE3EA; --cs-border2:#C3CEDA; --cs-inborder:#D3DCE5;
+    --cs-text:#0F1C24; --cs-sub:#5A6B7A; --cs-faint:#8A98A6;
+    --cs-input:#FFFFFF; --cs-soft:#EDF1F5; --cs-hover:#EDF1F5;
+    --cs-ctrl-hover:#E5EBF1; --cs-ctrl-ico:#5A6B7A; --cs-edge:#B6C2CE;
+    --cs-attr:#A7B3BF; --cs-scheme:light;
+  }
+  `;
+  document.head.appendChild(s);
+}
+
+function csApplyTheme(dark) {
+  csInjectThemeVars();
+  document.documentElement.classList.toggle("cs-light", !dark);
+  if (document.body) document.body.style.background = "var(--cs-bg)";
+}
+
+/* Theme Chatwoot se aati hai:
+     1. pehli baar URL mein   ?theme=dark|light
+     2. baad mein badle to    postMessage { type: "chatssync:theme" }
+     3. kuch na mile to dark  — yani bilkul jaisa pehle tha, kuch na toote */
+(function csInitTheme() {
+  let dark = true;
+  try {
+    if (params.get("theme") === "light") dark = false;
+  } catch (e) {
+    /* ignore */
+  }
+  csApplyTheme(dark);
+  if (!window.__csThemeHooked) {
+    window.__csThemeHooked = true;
+    window.addEventListener("message", (e) => {
+      if (e && e.data && e.data.type === "chatssync:theme") {
+        csApplyTheme(e.data.theme === "dark");
+      }
+    });
+    document.addEventListener("DOMContentLoaded", () =>
+      csApplyTheme(!document.documentElement.classList.contains("cs-light"))
+    );
+  }
+})();
 const NC = { start: "#5B8DEF", text: "#4C84FF", buttons: "#2EA66B", list: "#9B6DF0", media: "#C8902B", cta: "#3A7DE0", question: "#4F90E8", delay: "#7C8696", condition: "#CC6A2E", tag: "#D9694A", form: "#2B9F94", catalog: "#E0912B", appointment: "#0EA5E9", stop: "#E5524A" };
 const ACCENT = "#4C84FF";
 
@@ -72,22 +136,22 @@ function injectStyles() {
   s.textContent = `
   .react-flow__controls{box-shadow:0 4px 16px rgba(0,0,0,.4);border-radius:8px;overflow:hidden;border:1px solid ${D.border};}
   .react-flow__controls-button{background:${D.panel2};border-bottom:1px solid ${D.border};}
-  .react-flow__controls-button:hover{background:#1C2433;}
-  .react-flow__controls-button svg{fill:#aeb8c8;}
+  .react-flow__controls-button:hover{background:var(--cs-ctrl-hover);}
+  .react-flow__controls-button svg{fill:var(--cs-ctrl-ico);}
   .react-flow__minimap{background:${D.bg} !important;border:1px solid ${D.border};border-radius:8px;}
-  .react-flow__attribution{background:transparent;color:#3a4350;}
-  .react-flow__edge-path{stroke:#3b4658;stroke-width:1.8;}
+  .react-flow__attribution{background:transparent;color:var(--cs-attr);}
+  .react-flow__edge-path{stroke:var(--cs-edge);stroke-width:1.8;}
   .react-flow__edge.selected .react-flow__edge-path,.react-flow__edge:hover .react-flow__edge-path{stroke:${ACCENT};}
   .react-flow__handle{transition:transform .1s;}
   .react-flow__handle:hover{transform:scale(1.25);}
-  .cs-pal:hover{border-color:#39455a!important;background:#1A212D!important;}
-  .cs-in{background:${D.input};border:1px solid #2A3340;color:${D.text};box-sizing:border-box;max-width:100%;}
+  .cs-pal:hover{border-color:var(--cs-border2)!important;background:var(--cs-hover)!important;}
+  .cs-in{background:${D.input};border:1px solid var(--cs-inborder);color:${D.text};box-sizing:border-box;max-width:100%;}
   .cs-in:focus{outline:none;border-color:${ACCENT};box-shadow:0 0 0 3px ${hexA(ACCENT, .16)};}
   .cs-in::placeholder{color:${D.faint};}
-  .cs-gcard:hover{border-color:#39455a!important;transform:translateY(-2px);}
+  .cs-gcard:hover{border-color:var(--cs-border2)!important;transform:translateY(-2px);}
   .cs-pub:hover{filter:brightness(1.07);}
-  .cs-row:hover{background:#1A212D;}
-  .cs-tcard:hover{border-color:#39455a!important;transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.4)!important;}
+  .cs-row:hover{background:var(--cs-hover);}
+  .cs-tcard:hover{border-color:var(--cs-border2)!important;transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.4)!important;}
   .no-scrollbar::-webkit-scrollbar{display:none;}
   .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none;}
   `;
@@ -595,7 +659,7 @@ function Dashboard({ onEdit }) {
                     <div style={{ fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
                     <span style={pill(f.status)}>{f.status}</span>
                   </div>
-                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ width: "100%", padding: "9px 10px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: T.font, color: T.text, background: D.input, colorScheme: "dark", boxSizing: "border-box", marginBottom: 10 }}>
+                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ width: "100%", padding: "9px 10px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: T.font, color: T.text, background: D.input, colorScheme: "var(--cs-scheme)", boxSizing: "border-box", marginBottom: 10 }}>
                     <option value="">— None (off)</option>
                     {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
                   </select>
@@ -624,7 +688,7 @@ function Dashboard({ onEdit }) {
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{f.name}</div>
                 <div><span style={pill(f.status)}>{f.status}</span></div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ padding: "6px 8px", border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: D.input, colorScheme: "dark", maxWidth: 170 }}>
+                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ padding: "6px 8px", border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: D.input, colorScheme: "var(--cs-scheme)", maxWidth: 170 }}>
                     <option value="">— None (off)</option>
                     {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
                   </select>
