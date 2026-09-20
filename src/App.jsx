@@ -1,1298 +1,1378 @@
-import { useCallback, useRef, useState, useEffect, createContext, useContext } from "react";
-import ReactFlow, {
-  Background, Controls, MiniMap, addEdge,
-  useNodesState, useEdgesState, Handle, Position,
-  BaseEdge, EdgeLabelRenderer, getBezierPath,
-} from "reactflow";
-import "reactflow/dist/style.css";
+import express from "express";
+import axios from "axios";
+import http from "http";
+import https from "https";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import multer from "multer";
+import FormData from "form-data";
+import { spawn } from "child_process";
+import crypto from "crypto";
+import {
+  initDb, seedFlowIfEmpty, getPublishedFlowForInbox, getSession, saveSession,
+  listFlows, createFlow, getFlowById, saveFlowById, publishFlowById, unpublishFlowById, deleteFlowById, assignInbox,
+  addMedia, listMedia, getMedia, deleteMedia,
+  getApptSettings, saveApptSettings,
+  listApptBookings, createApptBooking, getApptBookingBySlot,
+} from "./db.js";
 
-const params = new URLSearchParams(window.location.search);
-const API = (import.meta.env.VITE_API_URL || "https://bot.chatssync.online").replace(/\/$/, "");
-const ACCOUNT_ID = parseInt(params.get("account_id") || import.meta.env.VITE_ACCOUNT_ID || "3", 10);
-
-/* ===== THEME =====
-   PEHLE in dono object mein rang pakke hex likhe the, isi liye builder
-   hamesha dark rehta tha — light mode tha hi nahi.
-   Ab ye CSS variables par hain. Faida: neeche ki 1200 lines mein jahan
-   jahan D.card / T.text waghera likha hai, woh ek lafz bhi nahi badla —
-   inline style mein var() bilkul theek chalta hai.
-   Accent rang (ACCENT, NC, green, blue) jaan-boojh kar hex hi rahe:
-   woh dono theme mein chalte hain, aur hexA() unpar hisaab karta hai. */
-const T = { blue: "#4C84FF", text: "var(--cs-text)", sub: "var(--cs-sub)", border: "var(--cs-border)", bg: "var(--cs-bg)", soft: "var(--cs-soft)", green: "#3BD17F", greenBg: "rgba(46,166,107,.16)", grayPill: "var(--cs-sub)", grayPillBg: "rgba(124,134,150,.16)", font: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
-const D = { bg: "var(--cs-bg)", panel: "var(--cs-panel)", panel2: "var(--cs-panel2)", card: "var(--cs-card)", border: "var(--cs-border)", text: "var(--cs-text)", sub: "var(--cs-sub)", faint: "var(--cs-faint)", input: "var(--cs-input)" };
-
-function csInjectThemeVars() {
-  if (document.getElementById("cs-theme-vars")) return;
-  const s = document.createElement("style");
-  s.id = "cs-theme-vars";
-  s.textContent = `
-  :root{
-    --cs-bg:#0B0F17; --cs-panel:#0F141E; --cs-panel2:#161C28; --cs-card:#161C28;
-    --cs-border:#242C3A; --cs-border2:#39455A; --cs-inborder:#2A3340;
-    --cs-text:#E8ECF3; --cs-sub:#94A0B4; --cs-faint:#5C6878;
-    --cs-input:#0F1622; --cs-soft:#161C28; --cs-hover:#1A212D;
-    --cs-ctrl-hover:#1C2433; --cs-ctrl-ico:#AEB8C8; --cs-edge:#3B4658;
-    --cs-attr:#3A4350; --cs-scheme:dark;
-  }
-  :root.cs-light{
-    --cs-bg:#F3F6F9; --cs-panel:#FFFFFF; --cs-panel2:#FFFFFF; --cs-card:#FFFFFF;
-    --cs-border:#DCE3EA; --cs-border2:#C3CEDA; --cs-inborder:#D3DCE5;
-    --cs-text:#0F1C24; --cs-sub:#5A6B7A; --cs-faint:#8A98A6;
-    --cs-input:#FFFFFF; --cs-soft:#EDF1F5; --cs-hover:#EDF1F5;
-    --cs-ctrl-hover:#E5EBF1; --cs-ctrl-ico:#5A6B7A; --cs-edge:#B6C2CE;
-    --cs-attr:#A7B3BF; --cs-scheme:light;
-  }
-  `;
-  document.head.appendChild(s);
+const PORT = process.env.PORT || 3000;
+const CHATWOOT_BASE_URL = process.env.CHATWOOT_BASE_URL;
+const BOT_TOKEN = process.env.CHATWOOT_BOT_TOKEN;
+const ADMIN_TOKEN = process.env.CHATWOOT_API_TOKEN;
+const UPLOAD_DIR = process.env.UPLOAD_DIR || "/data/uploads";
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+const WA_TOKEN = process.env.WA_TOKEN || "";
+const WA_PHONE_ID = process.env.WA_PHONE_NUMBER_ID || "";
+const WA_VER = process.env.WA_GRAPH_VERSION || "v21.0";
+const WA_ACCOUNT_ID = process.env.WA_ACCOUNT_ID || "";
+const CHATWOOT_DB_URL = process.env.CHATWOOT_DB_URL || "";
+let chatwootDb = null, chatwootDbTried = false;
+async function getChatwootDb() {
+  if (chatwootDb || chatwootDbTried) return chatwootDb;
+  chatwootDbTried = true;
+  if (!CHATWOOT_DB_URL) return null;
+  try { const pg = (await import("pg")).default; chatwootDb = new pg.Pool({ connectionString: CHATWOOT_DB_URL, max: 3 }); chatwootDb.on("error", (e) => console.error("chatwootDb pool", e.message)); console.log("chatwootDb: connected"); }
+  catch (e) { console.error("chatwootDb init FAIL", e.message); chatwootDb = null; }
+  return chatwootDb;
 }
-
-function csApplyTheme(dark) {
-  csInjectThemeVars();
-  document.documentElement.classList.toggle("cs-light", !dark);
-  if (document.body) document.body.style.background = "var(--cs-bg)";
-}
-
-/* Theme Chatwoot se aati hai:
-     1. pehli baar URL mein   ?theme=dark|light
-     2. baad mein badle to    postMessage { type: "chatssync:theme" }
-     3. kuch na mile to dark  — yani bilkul jaisa pehle tha, kuch na toote */
-(function csInitTheme() {
-  let dark = true;
+const GOOGLE_SA_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || "";
+let _gTok = null, _gTokExp = 0;
+async function getGoogleToken() {
+  if (!GOOGLE_SA_JSON) return null;
+  if (_gTok && Date.now() < _gTokExp - 60000) return _gTok;
   try {
-    if (params.get("theme") === "light") dark = false;
+    const creds = JSON.parse(GOOGLE_SA_JSON);
+    const now = Math.floor(Date.now() / 1000);
+    const b64u = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const unsigned = b64u({ alg: "RS256", typ: "JWT" }) + "." + b64u({ iss: creds.client_email, scope: "https://www.googleapis.com/auth/spreadsheets", aud: "https://oauth2.googleapis.com/token", exp: now + 3600, iat: now });
+    const signature = crypto.createSign("RSA-SHA256").update(unsigned).sign((creds.private_key || "").replace(/\\n/g, "\n"), "base64url");
+    const r = await axios.post("https://oauth2.googleapis.com/token", new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: unsigned + "." + signature }).toString(), { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 15000 });
+    _gTok = r.data.access_token; _gTokExp = Date.now() + (r.data.expires_in || 3600) * 1000;
+    return _gTok;
+  } catch (e) { console.error("googleSheets token FAIL", e.response?.data?.error_description || e.message); return null; }
+}
+function sheetIdFromUrl(sheetUrl) {
+  const m = String(sheetUrl || "").match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : null;
+}
+async function appendToSheet(sheetUrl, data) {
+  try {
+    if (!sheetUrl) return;
+    const id = sheetIdFromUrl(sheetUrl);
+    if (!id) return;
+    const token = await getGoogleToken();
+    if (!token) return;
+    const base = `https://sheets.googleapis.com/v4/spreadsheets/${id}/values`;
+    const H = { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 };
+    let headers = [];
+    try { const r = await axios.get(`${base}/A1:1`, H); headers = (r.data.values && r.data.values[0]) || []; } catch (e) {}
+    let changed = false;
+    for (const k of Object.keys(data)) { if (!headers.includes(k)) { headers.push(k); changed = true; } }
+    if (changed) await axios.put(`${base}/A1?valueInputOption=RAW`, { values: [headers] }, H);
+    const row = headers.map((h) => (data[h] != null ? String(data[h]) : ""));
+    await axios.post(`${base}/A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { values: [row] }, H);
+    console.log("appendToSheet OK", id);
+  } catch (e) { console.error("appendToSheet FAIL", e.response?.data?.error?.message || e.message); }
+}
+async function checkSheetAccess(sheetUrl) {
+  const id = sheetIdFromUrl(sheetUrl);
+  if (!id) return { ok: false, error: "That doesn't look like a Google Sheets link." };
+  const token = await getGoogleToken();
+  if (!token) return { ok: false, error: "GOOGLE_SERVICE_ACCOUNT_JSON not set on the server." };
+  try {
+    await axios.get(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=spreadsheetId`, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+    return { ok: true };
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    return { ok: false, error: "Couldn't access this sheet. Share it with the service account email (Editor access). " + msg };
+  }
+}
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const seedFlow = JSON.parse(fs.readFileSync("./flow.json", "utf-8"));
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+const cw = axios.create({ httpAgent, httpsAgent, timeout: 20000 });
+const app = express();
+app.use(express.json({ limit: "2mb" }));
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
+app.use("/uploads", express.static(UPLOAD_DIR));
+app.use(express.static("public"));
+app.get("/", (req, res) => res.send("ChatsSync bot engine is running"));
+const parseDef = (d) => (typeof d === "string" ? JSON.parse(d) : d);
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => { const ext = path.extname(file.originalname || ""); cb(null, "m" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + ext); },
+});
+const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+function mediaType(mime) { if (!mime) return "document"; if (mime.startsWith("image/")) return "image"; if (mime.startsWith("video/")) return "video"; if (mime.startsWith("audio/")) return "audio"; return "document"; }
+function fileUrl(req, filename) { return PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/uploads/${filename}` : `${req.protocol}://${req.get("host")}/uploads/${filename}`; }
+
+app.post("/api/upload", upload.single("file"), async (req, res) => {
+  try {
+    const accountId = parseInt(req.body.account_id || req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    if (!req.file) return res.status(400).json({ error: "file required" });
+    const url = fileUrl(req, req.file.filename);
+    const type = mediaType(req.file.mimetype);
+    const row = await addMedia(accountId, req.file.filename, req.file.originalname, url, type, req.file.size);
+    res.json({ ok: true, media: { id: row.id, url: row.url, type: row.type, original_name: row.original_name, size: row.size } });
+  } catch (e) { console.error("upload", e.message); res.status(500).json({ error: e.message }); }
+});
+app.get("/api/media", async (req, res) => {
+  try { const accountId = parseInt(req.query.account_id, 10); if (!accountId) return res.status(400).json({ error: "account_id required" }); res.json({ media: await listMedia(accountId) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/api/media/:id", async (req, res) => {
+  try { const m = await getMedia(parseInt(req.params.id, 10)); if (m) { try { fs.unlinkSync(path.join(UPLOAD_DIR, m.filename)); } catch {} await deleteMedia(m.id); } res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const flowCache = new Map();
+function clearFlowCache() { flowCache.clear(); }
+async function cachedPublishedFlow(accountId, inboxId) {
+  const key = accountId + ":" + inboxId; const now = Date.now(); const c = flowCache.get(key);
+  if (c && c.exp > now) return c.row;
+  const row = await getPublishedFlowForInbox(accountId, inboxId);
+  flowCache.set(key, { row, exp: now + 5000 });
+  return row;
+}
+
+app.get("/api/flows", async (req, res) => { try { const a = parseInt(req.query.account_id, 10); if (!a) return res.status(400).json({ error: "account_id required" }); res.json({ flows: await listFlows(a) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post("/api/flows", async (req, res) => { try { const { account_id, name, inbox_id } = req.body || {}; const a = parseInt(account_id, 10); if (!a) return res.status(400).json({ error: "account_id required" }); const row = await createFlow(a, name, inbox_id != null ? parseInt(inbox_id, 10) : null); clearFlowCache(); res.json({ ok: true, flow: { id: row.id, name: row.name, status: row.status, inbox_id: row.inbox_id } }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get("/api/flows/:id", async (req, res) => { try { const row = await getFlowById(parseInt(req.params.id, 10)); if (!row) return res.status(404).json({ error: "not found" }); res.json({ flow: { id: row.id, name: row.name, status: row.status, inbox_id: row.inbox_id, definition: parseDef(row.definition) } }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.put("/api/flows/:id", async (req, res) => { try { const { name, definition } = req.body || {}; if (!definition || !definition.nodes) return res.status(400).json({ error: "definition required" }); const row = await saveFlowById(parseInt(req.params.id, 10), name, definition); if (!row) return res.status(404).json({ error: "not found" }); clearFlowCache(); res.json({ ok: true, flow: { id: row.id, name: row.name, status: row.status } }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post("/api/flows/:id/publish", async (req, res) => { try { const row = await publishFlowById(parseInt(req.params.id, 10)); if (!row) return res.status(404).json({ error: "not found" }); clearFlowCache(); res.json({ ok: true, flow: { id: row.id, status: row.status } }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post("/api/flows/:id/unpublish", async (req, res) => { try { const row = await unpublishFlowById(parseInt(req.params.id, 10)); if (!row) return res.status(404).json({ error: "not found" }); clearFlowCache(); res.json({ ok: true, flow: { id: row.id, status: row.status } }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.delete("/api/flows/:id", async (req, res) => { try { await deleteFlowById(parseInt(req.params.id, 10)); clearFlowCache(); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post("/api/flows/:id/assign-inbox", async (req, res) => { try { const inboxId = (req.body || {}).inbox_id; const row = await assignInbox(parseInt(req.params.id, 10), inboxId != null ? parseInt(inboxId, 10) : null); if (!row) return res.status(404).json({ error: "not found" }); clearFlowCache(); res.json({ ok: true, flow: { id: row.id, inbox_id: row.inbox_id } }); } catch (e) { res.status(500).json({ error: e.message }); } });
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+function dateStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function minutesToHHMM(mins) { const h = Math.floor(mins / 60), m = mins % 60; return `${pad2(h)}:${pad2(m)}`; }
+function hhmmToMinutes(hhmm) { const [h, m] = String(hhmm || "00:00").split(":").map((x) => parseInt(x, 10) || 0); return h * 60 + m; }
+function buildDaySlots(cfg, dateISO) {
+  const wdays = String(cfg.working_days || "1,2,3,4,5").split(",").map((x) => parseInt(x, 10));
+  const d = new Date(dateISO + "T00:00:00");
+  if (!wdays.includes(d.getDay())) return [];
+  const startMin = hhmmToMinutes(cfg.start_time || "09:00");
+  const endMin = hhmmToMinutes(cfg.end_time || "17:00");
+  const dur = Math.max(5, parseInt(cfg.slot_duration, 10) || 30);
+  const buf = Math.max(0, parseInt(cfg.buffer_time, 10) || 0);
+  const step = dur + buf;
+  const out = [];
+  for (let t = startMin; t + dur <= endMin; t += step) out.push(minutesToHHMM(t));
+  return out;
+}
+function fmtDateLabel(dateISO) {
+  const [y, mo, d] = dateISO.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${parseInt(d, 10)} ${months[parseInt(mo, 10) - 1]} ${y}`;
+}
+function fmtTimeLabel(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const ap = h >= 12 ? "PM" : "AM";
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${pad2(h12)}:${pad2(m)} ${ap}`;
+}
+
+app.get("/api/appointments/settings", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    const s = await getApptSettings(accountId);
+    res.json({ ok: true, settings: s || {} });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put("/api/appointments/settings", async (req, res) => {
+  try {
+    const { account_id, sheet_url, ...settings } = req.body || {};
+    const accountId = parseInt(account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    if (sheet_url && sheet_url.trim()) {
+      const chk = await checkSheetAccess(sheet_url.trim());
+      if (!chk.ok) return res.status(400).json({ error: chk.error });
+    }
+    const row = await saveApptSettings(accountId, { ...settings, sheet_url: (sheet_url || "").trim() });
+    res.json({ ok: true, settings: row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/api/appointments/check-sheet", async (req, res) => {
+  try {
+    const { sheet_url } = req.body || {};
+    if (!sheet_url) return res.status(400).json({ error: "sheet_url required" });
+    const chk = await checkSheetAccess(sheet_url);
+    if (!chk.ok) return res.status(400).json({ error: chk.error });
+    let serviceEmail = "";
+    if (GOOGLE_SA_JSON) { try { serviceEmail = JSON.parse(GOOGLE_SA_JSON).client_email || ""; } catch {} }
+    res.json({ ok: true, service_email: serviceEmail });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get("/api/appointments/service-email", async (req, res) => {
+  let serviceEmail = "";
+  if (GOOGLE_SA_JSON) { try { serviceEmail = JSON.parse(GOOGLE_SA_JSON).client_email || ""; } catch {} }
+  res.json({ ok: true, service_email: serviceEmail });
+});
+
+app.get("/api/appointments/slots", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    const date = req.query.date;
+    if (!accountId || !date) return res.status(400).json({ error: "account_id and date required" });
+    const cfg = (await getApptSettings(accountId)) || {};
+    const all = buildDaySlots(cfg, date);
+    const booked = new Set((await listApptBookings(accountId, date)).map((b) => b.time));
+    const slots = all.map((t) => ({ time: t, label: fmtTimeLabel(t), available: !booked.has(t) }));
+    res.json({ ok: true, date, date_label: fmtDateLabel(date), slots });
+  } catch (e) { console.error("GET /api/appointments/slots", e.message); res.status(500).json({ error: e.message }); }
+});
+
+async function buildUpcomingSlotOptions(accountId, maxOptions) {
+  const cfg = (await getApptSettings(accountId)) || {};
+  const advance = Math.max(1, Math.min(parseInt(cfg.advance_days, 10) || 14, 30));
+  const today = new Date();
+  const out = [];
+  for (let i = 0; i < advance && out.length < (maxOptions || 25); i++) {
+    const d = new Date(today); d.setDate(d.getDate() + i);
+    const iso = dateStr(d);
+    const daySlots = buildDaySlots(cfg, iso);
+    if (!daySlots.length) continue;
+    const booked = new Set((await listApptBookings(accountId, iso)).map((b) => b.time));
+    for (const t of daySlots) {
+      if (booked.has(t)) continue;
+      out.push({ id: `${iso}|${t}`, title: `${fmtDateLabel(iso)} - ${fmtTimeLabel(t)}` });
+      if (out.length >= (maxOptions || 25)) break;
+    }
+  }
+  return out;
+}
+
+app.get("/api/appointments/dates", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    const cfg = (await getApptSettings(accountId)) || {};
+    const advance = Math.max(1, Math.min(parseInt(cfg.advance_days, 10) || 14, 90));
+    const out = [];
+    const today = new Date();
+    for (let i = 0; i < advance && out.length < 30; i++) {
+      const d = new Date(today); d.setDate(d.getDate() + i);
+      const iso = dateStr(d);
+      if (buildDaySlots(cfg, iso).length) out.push({ date: iso, label: fmtDateLabel(iso) });
+    }
+    res.json({ ok: true, dates: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function bookAppointmentInternal(accountId, { date, time, answers, convId }) {
+  const cfg = (await getApptSettings(accountId)) || {};
+  const daySlots = buildDaySlots(cfg, date);
+  if (!daySlots.includes(time)) return { ok: false, error: "That time isn't a valid slot." };
+  const existing = await getApptBookingBySlot(accountId, date, time);
+  if (existing) return { ok: false, error: "slot_taken" };
+  const row = await createApptBooking(accountId, date, time, answers || {}, convId || null);
+  if (cfg.sheet_url) {
+    const sheetRow = { Time: new Date().toLocaleString(), Date: fmtDateLabel(date), Slot: fmtTimeLabel(time), ...(answers || {}) };
+    appendToSheet(cfg.sheet_url, sheetRow).catch(() => {});
+  }
+  return { ok: true, booking: row };
+}
+
+function sanitizeFieldName(str, idx) {
+  let s = String(str || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!s) s = "field_" + idx;
+  if (/^[0-9]/.test(s)) s = "f_" + s;
+  return s.slice(0, 32);
+}
+function getMappedQuestions(questions) {
+  const seen = new Set();
+  const out = [];
+  (questions || []).forEach((q, idx) => {
+    if (!(q.label || "").trim()) return;
+    let base = sanitizeFieldName(q.key || q.label, idx);
+    if (base === "slot") base = "slot_field";
+    let name = base;
+    let c = 1;
+    while (seen.has(name)) { name = `${base}_${c++}`; }
+    seen.add(name);
+    out.push({ label: String(q.label).slice(0, 30), originalKey: q.key || q.label, sanitized: name, input_type: q.input_type });
+  });
+  return out;
+}
+function buildApptFlowJson(questions) {
+  const mapped = getMappedQuestions(questions);
+  const qFields = mapped.map(q => ({
+    type: "TextInput",
+    required: true,
+    label: (q.label || "Name").slice(0,30).replace(/[^a-zA-Z0-9 ]/g, " ").trim() || "Name",
+    name: q.sanitized,
+    "input-type": "text",
+  }));
+  const exampleSlots = [
+    { id: "slot_1", title: "20 Aug 9 AM" },
+    { id: "slot_2", title: "20 Aug 9 30 AM" }
+  ];
+  return {
+    version: "7.1",
+    data_api_version: "3.0",
+    routing_model: { BOOKING: [] },
+    screens: [
+      {
+        id: "BOOKING",
+        title: "Book Appointment",
+        terminal: true,
+        data: {
+          slots: {
+            type: "array",
+            items: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } } },
+            __example__: exampleSlots
+          }
+        },
+        layout: {
+          type: "SingleColumnLayout",
+          children: [
+            { type: "TextHeading", text: "Select date and time" },
+            { type: "Dropdown", name: "selected_slot", label: "Date and time", required: true, "data-source": "${data.slots}" },
+            ...qFields,
+            {
+              type: "Footer",
+              label: "Confirm booking",
+              "on-click-action": {
+                name: "complete",
+                payload: Object.fromEntries([
+                  ["slot", "${form.selected_slot}"],
+                  ...mapped.map(f => [f.sanitized, "${form." + f.sanitized + "}"])
+                ])
+              }
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+
+app.get("/api/appointments/flow-json", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    const cfg = (await getApptSettings(accountId)) || {};
+    const questions = (cfg.questions ? (typeof cfg.questions === "string" ? JSON.parse(cfg.questions) : cfg.questions) : []);
+    res.json({ ok: true, flow_json: buildApptFlowJson(questions) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function graphCreateFlow(token, wabaId, name) {
+  const uniqueName = ("Appt " + Date.now()).slice(0, 40);
+  const r = await axios.post("https://graph.facebook.com/" + WA_VER + "/" + wabaId + "/flows",
+    { name: uniqueName, categories: ["OTHER"] },
+    { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, timeout: 20000 });
+  return r.data;
+}
+async function graphUploadFlowAsset(token, flowId, flowJsonObj) {
+  const fd = new FormData();
+  fd.append("name", "flow.json");
+  fd.append("asset_type", "FLOW_JSON");
+  fd.append("file", Buffer.from(JSON.stringify(flowJsonObj)), { filename: "flow.json", contentType: "application/json" });
+  const r = await axios.post("https://graph.facebook.com/" + WA_VER + "/" + flowId + "/assets", fd,
+    { headers: { Authorization: "Bearer " + token, ...fd.getHeaders() }, timeout: 20000 });
+  return r.data;
+}
+async function graphPublishFlow(token, flowId) {
+  const r = await axios.post("https://graph.facebook.com/" + WA_VER + "/" + flowId + "/publish", {},
+    { headers: { Authorization: "Bearer " + token }, timeout: 20000 });
+  return r.data;
+}
+async function graphGetFlowStatus(token, flowId) {
+  const r = await axios.get("https://graph.facebook.com/" + WA_VER + "/" + flowId + "?fields=status,validation_errors",
+    { headers: { Authorization: "Bearer " + token }, timeout: 15000 });
+  return r.data;
+}
+
+app.post("/api/appointments/create-flow", async (req, res) => {
+  try {
+    const { account_id, inbox_id, waba_id } = req.body || {};
+    const accountId = parseInt(account_id, 10);
+    const inboxId = parseInt(inbox_id, 10);
+    if (!accountId || !inboxId || !waba_id) return res.status(400).json({ error: "account_id, inbox_id and waba_id are all required" });
+    const creds = await getWaCreds(accountId, inboxId);
+    if (!creds) return res.status(400).json({ error: "Couldn't find WhatsApp API credentials" });
+    const cfg = (await getApptSettings(accountId)) || {};
+    const questions = (cfg.questions ? (typeof cfg.questions === "string" ? JSON.parse(cfg.questions) : cfg.questions) : []);
+    const flowJson = buildApptFlowJson(questions);
+    let flowId = cfg.flow_id || "";
+    if (flowId) {
+      try {
+        const st = await graphGetFlowStatus(creds.token, flowId);
+        if (st.status === "ERROR" || (st.validation_errors && st.validation_errors.length)) {
+          try { await axios.delete("https://graph.facebook.com/" + WA_VER + "/" + flowId, { headers: { Authorization: "Bearer " + creds.token } }); } catch {}
+          flowId = "";
+        }
+      } catch { flowId = ""; }
+    }
+    try {
+      if (!flowId) {
+        const created = await graphCreateFlow(creds.token, waba_id, "Appointment Booking");
+        flowId = created.id;
+      }
+      await graphUploadFlowAsset(creds.token, flowId, flowJson);
+      await graphPublishFlow(creds.token, flowId);
+      await saveApptSettings(accountId, { ...cfg, waba_id, flow_id: flowId, flow_inbox_id: inboxId, flow_status: "PUBLISHED" });
+      res.json({ ok: true, flow_id: flowId, status: "PUBLISHED" });
+    } catch (ge) {
+      console.error("Flow FAIL FULL:", JSON.stringify(ge.response?.data || {}, null, 2));
+      let fullErr = ge.response?.data || {};
+      let validationFromError = fullErr.error?.error_data?.details || fullErr.error?.error_data || "";
+      console.error("Validation details:", JSON.stringify(validationFromError, null, 2));
+      const detail = ge.response?.data?.error?.error_user_msg || ge.response?.data?.error?.message || JSON.stringify(ge.response?.data?.error || {}).slice(0,1000) || ge.message;
+      if (flowId) await saveApptSettings(accountId, { ...cfg, waba_id, flow_id: flowId, flow_inbox_id: inboxId, flow_status: "ERROR" });
+      res.status(400).json({ error: "Meta rejected the Flow: " + detail, flow_id: flowId || null });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/appointments/flow-status", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    const cfg = (await getApptSettings(accountId)) || {};
+    if (!cfg.flow_id) return res.json({ ok: true, flow_id: null });
+    const creds = await getWaCreds(accountId, cfg.flow_inbox_id);
+    if (!creds) return res.json({ ok: true, flow_id: cfg.flow_id, status: cfg.flow_status || "unknown" });
+    try {
+      const live = await graphGetFlowStatus(creds.token, cfg.flow_id);
+      res.json({ ok: true, flow_id: cfg.flow_id, status: live.status, validation_errors: live.validation_errors || [] });
+    } catch { res.json({ ok: true, flow_id: cfg.flow_id, status: cfg.flow_status || "unknown" }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/appointments/bookings", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    const date = req.query.date || null;
+    res.json({ ok: true, bookings: await listApptBookings(accountId, date) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/inboxes", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    if (!ADMIN_TOKEN) return res.status(400).json({ error: "CHATWOOT_API_TOKEN not set" });
+    const r = await cw.get(`${CHATWOOT_BASE_URL}/api/v1/accounts/${accountId}/inboxes`, { headers: { api_access_token: ADMIN_TOKEN } });
+    res.json({ inboxes: (r.data?.payload || []).map((i) => ({ id: i.id, name: i.name, channel_type: i.channel_type })) });
+  } catch (e) { console.error("GET /api/inboxes", e.response?.data || e.message); res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/labels", async (req, res) => {
+  try {
+    const accountId = parseInt(req.query.account_id, 10);
+    if (!accountId) return res.status(400).json({ error: "account_id required" });
+    if (!ADMIN_TOKEN) return res.json({ labels: [] });
+    const r = await cw.get(`${CHATWOOT_BASE_URL}/api/v1/accounts/${accountId}/labels`, { headers: { api_access_token: ADMIN_TOKEN } });
+    res.json({ labels: (r.data?.payload || []).map((l) => l.title) });
+  } catch (e) { console.error("GET /api/labels", e.response?.data || e.message); res.json({ labels: [] }); }
+});
+
+async function apiPost(path2, body) {
+  try { return await cw.post(`${CHATWOOT_BASE_URL}${path2}`, body, { headers: { api_access_token: BOT_TOKEN } }); }
+  catch (e) {
+    const st = e.response?.status;
+    if ((st === 401 || st === 403) && ADMIN_TOKEN && ADMIN_TOKEN !== BOT_TOKEN) {
+      return cw.post(`${CHATWOOT_BASE_URL}${path2}`, body, { headers: { api_access_token: ADMIN_TOKEN } });
+    }
+    throw e;
+  }
+}
+async function sendText(a, c, text) { if (!text) return; try { await apiPost(`/api/v1/accounts/${a}/conversations/${c}/messages`, { content: text, message_type: "outgoing" }); } catch (e) { console.error("sendText", e.response?.data || e.message); } }
+async function sendOptions(a, c, text, titles) { try { const tl = titles || []; const maxLen = tl.length <= 3 ? 20 : 24; await apiPost(`/api/v1/accounts/${a}/conversations/${c}/messages`, { content: text || " ", message_type: "outgoing", content_type: "input_select", content_attributes: { items: tl.map((t) => { const tt = String(t).slice(0, maxLen); return { title: tt, value: tt }; }) } }); } catch (e) { console.error("sendOptions", e.response?.data || e.message); } }
+async function trySendFormListNative(a, c, field) {
+  try {
+    const info = await getConvInfo(a, c); if (!info.number || !info.inboxId) return false;
+    const creds = await getWaCreds(a, info.inboxId); if (!creds) return false;
+    const opts = (field.options || []).filter((o) => (o && o.title || "").trim()).slice(0, 10);
+    if (!opts.length) return false;
+    const rows = opts.map((o, i) => ({ id: `r${i}`, title: clip(o.title || `Option ${i + 1}`, 24) }));
+    const interactive = { type: "list", body: { text: clip(field.label || "Choose an option", 1024) }, action: { button: clip(field.list_button || "Choose", 20), sections: [{ title: "Options", rows }] } };
+    await waSend(creds, info.number, interactive);
+    await noteSent(a, c, field.label, rows.map((r) => r.title));
+    return true;
+  } catch (e) { console.error("formListNative FAIL", e.response?.status, JSON.stringify(e.response?.data || e.message)); return false; }
+}
+async function trySendFormButtonsNative(a, c, field) {
+  try {
+    const info = await getConvInfo(a, c); if (!info.number || !info.inboxId) return false;
+    const creds = await getWaCreds(a, info.inboxId); if (!creds) return false;
+    const opts = (field.options || []).filter((o) => (o && o.title || "").trim()).slice(0, 3);
+    if (!opts.length) return false;
+    const btns = opts.map((o, i) => ({ type: "reply", reply: { id: `b${i}`, title: clip(o.title || `Button ${i + 1}`, 20) } }));
+    const interactive = { type: "button", body: { text: clip(field.label || "Choose an option", 1024) }, action: { buttons: btns } };
+    await waSend(creds, info.number, interactive);
+    await noteSent(a, c, field.label, btns.map((b) => b.reply.title));
+    return true;
+  } catch (e) { console.error("formButtonsNative FAIL", e.response?.status, JSON.stringify(e.response?.data || e.message)); return false; }
+}
+async function sendFormField(a, c, field) {
+  const type = (field && field.type) || "text";
+  const hasOpts = Array.isArray(field.options) && field.options.filter((o) => (o && o.title || "").trim()).length;
+  if (type === "list" && hasOpts) { const ok = await trySendFormListNative(a, c, field); if (ok) return; }
+  if (type === "buttons" && hasOpts) { const ok = await trySendFormButtonsNative(a, c, field); if (ok) return; }
+  if ((type === "list" || type === "buttons") && hasOpts) {
+    const titles = field.options.map((o) => (o && o.title ? String(o.title) : "")).filter(Boolean);
+    if (titles.length) { await sendOptions(a, c, field.label || "Please choose:", titles); return; }
+  }
+  await sendText(a, c, field.label || "");
+}
+function catProductTitle(p) { return `${p.name}${p.price ? " — Rs " + p.price : ""}`; }
+async function sendCatalogProducts(a, c, prods) {
+  const lines = prods.map((p, i) => `*${i + 1}.* ${p.name}${p.price ? " — Rs " + p.price : ""}${p.desc ? "\n     _" + p.desc + "_" : ""}`);
+  const msg = "🛍 *Hamare Products:*\n\n" + lines.join("\n") + "\n\n👉 Order karne ke liye product ka *number* likhein (e.g. 1)";
+  await sendText(a, c, msg);
+}
+async function sendCatalogQty(a, c, node, prod) {
+  const qtys = (node.qty_options && node.qty_options.length ? node.qty_options : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]).map((x) => String(x)).slice(0, 10);
+  await sendOptions(a, c, `*${prod.name}* — kitne chahiye?`, qtys);
+}
+async function sendCatalogMore(a, c, node) {
+  const addL = (node.add_more_label || "➕ Add more").slice(0, 20);
+  const coL = (node.checkout_label || "✅ Confirm").slice(0, 20);
+  await sendOptions(a, c, "Aur kuch?", [addL, coL]);
+}
+function cartTotal(cart) { return (cart || []).reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0); }
+function cartLines(cart) { return (cart || []).map((it) => `• ${it.name} x${it.qty} — Rs ${(Number(it.price) || 0) * (Number(it.qty) || 0)}`).join("\n"); }
+function cartSummaryText(cart) { return cartLines(cart) + `\n\n*Total: Rs ${cartTotal(cart)}*`; }
+function buildCartMsg(cnode, cart, prod, qty, lineTotal) {
+  const tmpl = (cnode && cnode.cart_line && cnode.cart_line.trim()) ? cnode.cart_line : "🛒 *Aapka cart:*\n{{cart}}\n\n*Total: Rs {{cartTotal}}*";
+  return tmpl.replace(/\{\{\s*cart\s*\}\}/g, cartLines(cart)).replace(/\{\{\s*item\s*\}\}/g, prod.name).replace(/\{\{\s*qty\s*\}\}/g, String(qty)).replace(/\{\{\s*lineTotal\s*\}\}/g, String(lineTotal)).replace(/\{\{\s*cartTotal\s*\}\}/g, String(cartTotal(cart)));
+}
+async function finishCatalogOrder(a, c, s, def, cnode, cart, fans) {
+  const summary = "🧾 *Order Summary*\n" + cartSummaryText(cart) + (Object.keys(fans || {}).length ? "\n\n" + Object.entries(fans).map(([k, v]) => `• ${k}: ${v}`).join("\n") : "");
+  await sendText(a, c, summary);
+  if (cnode && cnode.submit_message) await sendText(a, c, cnode.submit_message);
+  if (cnode && cnode.sheet_url) {
+    try {
+      const _ci = await getConvInfo(a, c);
+      const itemsStr = (cart || []).map((it) => `${it.name} x${it.qty}`).join(", ");
+      await appendToSheet(cnode.sheet_url, { Time: new Date().toLocaleString(), Phone: (_ci && _ci.number) || "", Order: itemsStr, Total: cartTotal(cart), ...fans });
+    } catch (e) {}
+  }
+  delete s.variables.__cart; delete s.variables.__cat_stage; delete s.variables.__cat_pick;
+  delete s.variables.__form_idx; delete s.variables.__form_answers;
+  s.awaiting = null; s.nodeId = (cnode && cnode.next) || null;
+  await advance(a, c, s, def);
+}
+const convCache = new Map();
+async function getConvInfo(a, c) {
+  const hit = convCache.get(c); if (hit && hit.exp > Date.now()) return hit.info;
+  let info = { number: null, inboxId: null };
+  try {
+    const r = await cw.get(`${CHATWOOT_BASE_URL}/api/v1/accounts/${a}/conversations/${c}`, { headers: { api_access_token: ADMIN_TOKEN } });
+    const d = r.data || {}; const meta = d.meta || {};
+    let num = (meta.sender && (meta.sender.phone_number || meta.sender.identifier)) || "";
+    info = { number: String(num).replace(/[^\d]/g, "") || null, inboxId: d.inbox_id ?? meta.inbox_id ?? null };
+  } catch (e) {}
+  convCache.set(c, { info, exp: Date.now() + 600000 });
+  return info;
+}
+const credsCache = new Map();
+async function getWaCreds(a, inboxId) {
+  if (!inboxId) return null;
+  const key = `${a}:${inboxId}`;
+  const hit = credsCache.get(key); if (hit && hit.exp > Date.now()) return hit.creds;
+  let creds = null;
+  try {
+    const r = await cw.get(`${CHATWOOT_BASE_URL}/api/v1/accounts/${a}/inboxes/${inboxId}`, { headers: { api_access_token: ADMIN_TOKEN } });
+    const d = r.data || {}; const pc = d.provider_config || (d.channel && d.channel.provider_config) || {};
+    const token = pc.api_key || pc.access_token; const phoneId = pc.phone_number_id;
+    if (token && phoneId) creds = { token, phoneId, src: "api" };
+  } catch (e) {}
+  const db = await getChatwootDb();
+  if (!creds && db) {
+    try {
+      const q = await db.query("SELECT cw.provider_config AS pc FROM channel_whatsapp cw JOIN inboxes i ON i.channel_id = cw.id WHERE i.id = $1 AND i.channel_type = 'Channel::Whatsapp' LIMIT 1", [inboxId]);
+      const pc = (q.rows[0] && q.rows[0].pc) || {};
+      const token = pc.api_key || pc.access_token; const phoneId = pc.phone_number_id;
+      if (token && phoneId) creds = { token, phoneId, src: "db" };
+    } catch (e) {}
+  }
+  credsCache.set(key, { creds, exp: Date.now() + (creds ? 600000 : 120000) });
+  return creds;
+}
+function clip(x, n) { return x == null ? "" : String(x).slice(0, n); }
+function waHeader(node, textOnly) {
+  const h = node.header || {};
+  if (h.type === "text" && h.value) return { type: "text", text: clip(h.value, 60) };
+  if (!textOnly && ["image", "video", "document"].includes(h.type) && h.value) { const k = h.type; return { type: k, [k]: { link: h.value } }; }
+  return null;
+}
+async function waSend(creds, to, interactive) {
+  const r = await cw.post(`https://graph.facebook.com/${WA_VER}/${creds.phoneId}/messages`,
+    { messaging_product: "whatsapp", recipient_type: "individual", to, type: "interactive", interactive },
+    { headers: { Authorization: `Bearer ${creds.token}`, "Content-Type": "application/json" }, timeout: 15000 });
+  return r.data;
+}
+async function noteSent(a, c, body, options) {
+  try { let txt = "🤖 " + (body || "(interactive sent)"); if (options && options.length) txt += "\n• " + options.filter(Boolean).join("\n• "); await apiPost(`/api/v1/accounts/${a}/conversations/${c}/messages`, { content: txt, message_type: "outgoing", private: true }); } catch (e) {}
+}
+async function trySendButtonsNative(a, c, node) {
+  try {
+    const info = await getConvInfo(a, c); if (!info.number || !info.inboxId) return false;
+    const creds = await getWaCreds(a, info.inboxId); if (!creds) return false;
+    const btns = (node.buttons || []).slice(0, 3).map((b, i) => ({ type: "reply", reply: { id: `b${i}`, title: clip(b.title || `Button ${i + 1}`, 20) } }));
+    if (!btns.length) return false;
+    const interactive = { type: "button", body: { text: clip(node.text || "Choose an option", 1024) }, action: { buttons: btns } };
+    const hdr = waHeader(node, false); if (hdr) interactive.header = hdr;
+    if (node.footer) interactive.footer = { text: clip(node.footer, 60) };
+    await waSend(creds, info.number, interactive);
+    await noteSent(a, c, node.text, btns.map((b) => b.reply.title));
+    return true;
+  } catch (e) { console.error("buttonsNative FAIL", e.response?.status, JSON.stringify(e.response?.data || e.message)); return false; }
+}
+async function trySendListNative(a, c, node) {
+  try {
+    const info = await getConvInfo(a, c); if (!info.number || !info.inboxId) return false;
+    const creds = await getWaCreds(a, info.inboxId); if (!creds) return false;
+    const h = node.header || {};
+    if (["image", "video", "document"].includes(h.type) && h.value) { try { await sendMedia(a, c, h.value, ""); } catch (e) {} }
+    const srcSecs = (Array.isArray(node.sections) && node.sections.length) ? node.sections : [{ title: "", rows: node.rows || [] }];
+    const sections = []; let count = 0;
+    for (const sec of srcSecs) {
+      const rows = [];
+      for (const r of (sec.rows || [])) { if (count >= 10) break; const row = { id: `r${count}`, title: clip(r.title || `Option ${count + 1}`, 24) }; if (r.description) row.description = clip(r.description, 72); rows.push(row); count++; }
+      if (rows.length) sections.push({ title: clip(sec.title || "Options", 24), rows });
+      if (count >= 10) break;
+    }
+    if (!count) return false;
+    const interactive = { type: "list", body: { text: clip(node.body || "Choose an option", 1024) }, action: { button: clip(node.button || "Menu", 20), sections } };
+    const hdr = waHeader(node, true); if (hdr) interactive.header = hdr;
+    if (node.footer) interactive.footer = { text: clip(node.footer, 60) };
+    await waSend(creds, info.number, interactive);
+    await noteSent(a, c, node.body, listRows(node).map((r) => r.title));
+    return true;
+  } catch (e) { console.error("listNative FAIL", e.response?.status, JSON.stringify(e.response?.data || e.message)); return false; }
+}
+async function trySendCtaNative(a, c, node) {
+  try {
+    const info = await getConvInfo(a, c); if (!info.number || !info.inboxId) return false;
+    const creds = await getWaCreds(a, info.inboxId); if (!creds) return false;
+    const url = normUrl(node.url); if (!url) return false;
+    const interactive = { type: "cta_url", body: { text: clip(node.body || "Tap the button below", 1024) }, action: { name: "cta_url", parameters: { display_text: clip(node.display || "Open link", 20), url } } };
+    const hdr = waHeader(node, false); if (hdr) interactive.header = hdr;
+    if (node.footer) interactive.footer = { text: clip(node.footer, 60) };
+    await waSend(creds, info.number, interactive);
+    await noteSent(a, c, (node.body || "") + "\n🔗 " + url, null);
+    return true;
+  } catch (e) { console.error("ctaNative FAIL", e.response?.status, JSON.stringify(e.response?.data || e.message)); return false; }
+}
+async function trySendFlowNative(a, c, node) {
+  try {
+    const info = await getConvInfo(a, c); if (!info.number || !info.inboxId) return false;
+    const creds = await getWaCreds(a, info.inboxId); if (!creds) return false;
+    const cfg = (await getApptSettings(a)) || {};
+    const flowId = cfg.flow_id || node.flow_id || process.env.WA_APPOINTMENT_FLOW_ID || "";
+    if (!flowId) return false;
+    const slots = await buildUpcomingSlotOptions(a, 25);
+    if (!slots.length) { await sendText(a, c, "Abhi koi slot available nahi hai."); return true; }
+    const interactive = {
+      type: "flow",
+      body: { text: clip(node.text || "Book an appointment", 1024) },
+      action: { name: "flow", parameters: { flow_message_version: "3", flow_token: crypto.randomBytes(12).toString("hex"), flow_id: flowId, flow_cta: clip(node.button_text || "Book Appointment", 20), flow_action: "navigate", flow_action_payload: { screen: "BOOKING", data: { slots } } } },
+    };
+    if (node.footer) interactive.footer = { text: clip(node.footer, 60) };
+    await waSend(creds, info.number, interactive);
+    await noteSent(a, c, node.text, ["📅 Flow: " + (node.button_text || "Book Appointment")]);
+    return true;
+  } catch (e) { console.error("flowNative FAIL", e.response?.status, JSON.stringify(e.response?.data || e.message)); return false; }
+}
+function openConversation(a, c) { apiPost(`/api/v1/accounts/${a}/conversations/${c}/toggle_status`, { status: "open" }).catch((e) => console.error("openConversation", e.response?.data || e.message)); }
+async function addLabels(a, c, labels) {
+  try {
+    if (!labels || !labels.length) return;
+    const H = { headers: { api_access_token: ADMIN_TOKEN } };
+    let cur = [];
+    try { const r = await cw.get(`${CHATWOOT_BASE_URL}/api/v1/accounts/${a}/conversations/${c}/labels`, H); cur = r.data?.payload || []; } catch {}
+    const normL = labels.map((t) => String(t).toLowerCase().replace(/\s+/g, "_"));
+    const merged = [...new Set([...cur, ...normL])];
+    await cw.post(`${CHATWOOT_BASE_URL}/api/v1/accounts/${a}/conversations/${c}/labels`, { labels: merged }, H);
+  } catch (e) {}
+}
+function normUrl(u) { u = String(u || "").trim(); if (!u) return ""; if (!/^https?:\/\//i.test(u)) u = "https://" + u.replace(/^\/+/, ""); return u; }
+function ctaText(node) {
+  let out = (node.header && node.header.type === "text" && node.header.value ? node.header.value + "\n\n" : "") + (node.body || "");
+  const u = normUrl(node.url);
+  if (u) out += (out ? "\n\n" : "") + (node.display ? node.display + ": " : "") + u;
+  if (node.footer) out += "\n\n_" + node.footer + "_";
+  return out;
+}
+const norm = (s) => String(s == null ? "" : s).toLowerCase().trim();
+const normLoose = (s) => norm(s).replace(/[^a-z0-9\u0600-\u06FF]+/g, "");
+function levenshtein(a, b) {
+  a = normLoose(a); b = normLoose(b);
+  if (a === b) return 0; if (!a.length) return b.length; if (!b.length) return a.length;
+  const v0 = new Array(b.length + 1), v1 = new Array(b.length + 1);
+  for (let i = 0; i <= b.length; i++) v0[i] = i;
+  for (let i = 0; i < a.length; i++) { v1[0] = i + 1; for (let j = 0; j < b.length; j++) { const cost = a[i] === b[j] ? 0 : 1; v1[j + 1] = Math.min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost); } for (let j = 0; j <= b.length; j++) v0[j] = v1[j]; }
+  return v1[b.length];
+}
+function fuzzyEqual(a, b) { const x = normLoose(a), y = normLoose(b); if (!x || !y) return false; if (x === y || x.includes(y) || y.includes(x)) return true; const d = levenshtein(x, y); const m = Math.max(x.length, y.length); return m > 0 && (1 - d / m) >= 0.8; }
+function simRatio(a, b) { const x = normLoose(a), y = normLoose(b); if (!x || !y) return 0; if (x === y) return 1; const d = levenshtein(x, y); const m = Math.max(x.length, y.length); return m ? 1 - d / m : 0; }
+function fuzzyKeyword(text, k, threshold) { if (simRatio(text, k) >= threshold) return true; return norm(text).split(/\s+/).filter(Boolean).some((w) => simRatio(w, k) >= threshold); }
+function matchKeywords(text, keywords, fuzzy, sensitivity) { const th = Math.min(Math.max((parseInt(sensitivity, 10) || 80) / 100, 0.3), 1); return (keywords || []).some((k) => fuzzy ? fuzzyKeyword(text, k, th) : normLoose(text) === normLoose(k)); }
+function validateFormat(text, fmt) { const t = String(text || "").trim(); switch (fmt) { case "text": return t.length > 0; case "number": return /^-?\d+(\.\d+)?$/.test(t); case "email": return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t); case "phone": return /^[+]?[\d\s\-()]{7,}$/.test(t); default: return true; } }
+function evalSingle(cond, vars) {
+  const subst = (str) => String(str == null ? "" : str).replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] != null ? String(vars[k]) : ""));
+  let a = cond.first ? subst(cond.first) : (vars.last_message || ""); const b = subst(cond.second); const al = norm(a), bl = norm(b);
+  switch (cond.operator || "equals") { case "equals": return al === bl; case "not_equals": return al !== bl; case "contains": return al.includes(bl); case "not_contains": return !al.includes(bl); case "starts_with": return al.startsWith(bl); case "ends_with": return al.endsWith(bl); case "greater_than": return parseFloat(a) > parseFloat(b); case "less_than": return parseFloat(a) < parseFloat(b); case "is_email": return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.trim()); case "is_phone": return /^[+]?[\d\s\-()]{7,}$/.test(a.trim()); case "regex": try { return new RegExp(b, "i").test(a); } catch { return false; } case "fuzzy": return fuzzyEqual(a, b); default: return false; }
+}
+function evalConditionNode(node, vars) { const list = Array.isArray(node.conditions) && node.conditions.length ? node.conditions : [{ first: node.first, operator: node.operator, second: node.second }]; return (node.match === "any") ? list.some((c) => evalSingle(c, vars)) : list.every((c) => evalSingle(c, vars)); }
+function extToMime(name) { const ext = (String(name).split("?")[0].split(".").pop() || "").toLowerCase(); const map = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", mp4: "video/mp4", pdf: "application/pdf" }; return map[ext] || "application/octet-stream"; }
+const AUDIO_EXT = ["ogg", "oga", "opus", "wav", "m4a", "aac", "amr", "flac", "weba", "mka"];
+function runFfmpeg(args) { return new Promise((res) => { try { const p = spawn("ffmpeg", args, { stdio: "ignore" }); p.on("close", (code) => res(code)); p.on("error", () => res(-1)); } catch { res(-1); } }); }
+async function maybeTranscodeAudio(buffer, baseName) {
+  const ext = (String(baseName).split(".").pop() || "").toLowerCase();
+  if (!AUDIO_EXT.includes(ext)) return { buffer, filename: baseName, contentType: extToMime(baseName) };
+  try {
+    const tmpIn = path.join(os.tmpdir(), "csin_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6) + "." + ext);
+    const tmpOut = path.join(os.tmpdir(), "csout_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6) + ".mp3");
+    fs.writeFileSync(tmpIn, buffer);
+    const code = await runFfmpeg(["-y", "-i", tmpIn, "-vn", "-ar", "44100", "-ac", "2", "-b:a", "128k", tmpOut]);
+    if (code === 0 && fs.existsSync(tmpOut)) {
+      const out = fs.readFileSync(tmpOut);
+      try { fs.unlinkSync(tmpIn); } catch {} try { fs.unlinkSync(tmpOut); } catch {}
+      return { buffer: out, filename: String(baseName).replace(/\.[^.]+$/, "") + ".mp3", contentType: "audio/mpeg" };
+    }
+    try { fs.unlinkSync(tmpIn); } catch {}
+  } catch (e) {}
+  return { buffer, filename: baseName, contentType: extToMime(baseName) };
+}
+async function sendMedia(a, c, url, caption) {
+  try {
+    if (!url) return;
+    const clean = String(url).split("?")[0];
+    const baseName = decodeURIComponent(clean.split("/uploads/")[1] || clean.split("/").pop() || "file");
+    const localPath = path.join(UPLOAD_DIR, path.basename(baseName));
+    let buffer;
+    if (clean.includes("/uploads/") && fs.existsSync(localPath)) buffer = fs.readFileSync(localPath);
+    else { const resp = await cw.get(url, { responseType: "arraybuffer", maxContentLength: Infinity, maxBodyLength: Infinity }); buffer = Buffer.from(resp.data); }
+    const tx = await maybeTranscodeAudio(buffer, path.basename(baseName));
+    const mediaUrl = `${CHATWOOT_BASE_URL}/api/v1/accounts/${a}/conversations/${c}/messages`;
+    const mkForm = () => { const f = new FormData(); if (caption) f.append("content", caption); f.append("message_type", "outgoing"); f.append("attachments[]", tx.buffer, { filename: tx.filename, contentType: tx.contentType }); return f; };
+    const postForm = (tok) => { const f = mkForm(); return cw.post(mediaUrl, f, { headers: { api_access_token: tok, ...f.getHeaders() }, maxContentLength: Infinity, maxBodyLength: Infinity }); };
+    try { await postForm(BOT_TOKEN); } catch (e) { const st = e.response?.status; if ((st === 401 || st === 403) && ADMIN_TOKEN && ADMIN_TOKEN !== BOT_TOKEN) await postForm(ADMIN_TOKEN); else throw e; }
+  } catch (e) { console.error("sendMedia", e.response?.data || e.message); }
+}
+function toSession(row, fpa) { return { nodeId: row.node_id, awaiting: row.awaiting, variables: typeof row.variables === "string" ? JSON.parse(row.variables) : (row.variables || {}), flowPublishedAt: row.flow_published_at ? new Date(row.flow_published_at).toISOString() : fpa }; }
+function listRows(node) { return Array.isArray(node.sections) && node.sections.length ? node.sections.flatMap((s) => s.rows || []) : (node.rows || []); }
+async function sendHeaderMedia(a, c, node) { const h = node.header || {}; if (["image", "video", "document"].includes(h.type) && h.value) await sendMedia(a, c, h.value, ""); }
+function withHeaderFooter(node, body) { let out = (node.header && node.header.type === "text" && node.header.value ? node.header.value + "\n\n" : "") + (body || ""); if (node.footer) out += "\n\n_" + node.footer + "_"; return out; }
+function substVars(str, vars) { return (str == null ? str : String(str).replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => ((vars && vars[k] != null) ? String(vars[k]) : ""))); }
+async function runFlow(a, c, s, def) {
+  const startId = s.nodeId; const queue = Array.isArray(startId) ? startId.filter(Boolean) : (startId ? [startId] : []);
+  if (!queue.length) { s.awaiting = null; s.nodeId = null; return; }
+  if (s.variables) { delete s.variables.__delay_token; delete s.variables.__delay_next; delete s.variables.__delay_secs; }
+  const seen = new Set(); const vars = s.variables || {}; const subst = (str) => substVars(str, vars);
+  const applyVars = (node) => {
+    if (!node || typeof node !== "object") return node;
+    const n = { ...node };
+    ["text", "caption", "body", "intro", "footer", "submit_message", "timeout_message"].forEach((k) => { if (typeof n[k] === "string") n[k] = subst(n[k]); });
+    if (n.header && n.header.type === "text" && typeof n.header.value === "string") n.header = { ...n.header, value: subst(n.header.value) };
+    if (Array.isArray(n.buttons)) n.buttons = n.buttons.map((b) => (b && typeof b === "object" ? { ...b, title: subst(b.title) } : b));
+    if (Array.isArray(n.rows)) n.rows = n.rows.map((r) => (r && typeof r === "object" ? { ...r, title: subst(r.title), description: subst(r.description) } : r));
+    if (Array.isArray(n.sections)) n.sections = n.sections.map((sec) => (sec && typeof sec === "object" ? { ...sec, rows: Array.isArray(sec.rows) ? sec.rows.map((r) => (r && typeof r === "object" ? { ...r, title: subst(r.title), description: subst(r.description) } : r)) : sec.rows } : sec));
+    if (Array.isArray(n.fields)) n.fields = n.fields.map((f) => (f && typeof f === "object" ? { ...f, label: subst(f.label) } : f));
+    return n;
+  };
+  const nextsOf = (node) => { const v = node.next; const arr = Array.isArray(v) ? v : (v ? [v] : []); return arr.filter(Boolean); };
+  let awaitNode = null; let delayNode = null; let steps = 0;
+  while (queue.length && steps < 300) {
+    steps++; const id = queue.shift(); if (!id || seen.has(id)) continue; seen.add(id);
+    const rawNode = def.nodes[id]; if (!rawNode) continue; const node = applyVars(rawNode);
+    if (node.type === "text") { await sendText(a, c, node.text); nextsOf(node).forEach((x) => queue.push(x)); continue; }
+    if (node.type === "media") { await sendMedia(a, c, node.url, node.caption); nextsOf(node).forEach((x) => queue.push(x)); continue; }
+    if (node.type === "cta") { const okc = await trySendCtaNative(a, c, node); if (!okc) { await sendHeaderMedia(a, c, node); await sendText(a, c, ctaText(node)); } nextsOf(node).forEach((x) => queue.push(x)); continue; }
+    if (node.type === "tag") { await addLabels(a, c, node.labels || []); nextsOf(node).forEach((x) => queue.push(x)); continue; }
+    if (node.type === "handover") { if (node.text) await sendText(a, c, node.text); openConversation(a, c); continue; }
+    if (node.type === "condition") { const ok = evalConditionNode(node, s.variables || {}); const t = ok ? node.next_true : node.next_false; (Array.isArray(t) ? t : (t ? [t] : [])).forEach((x) => x && queue.push(x)); continue; }
+    if (node.type === "delay") { const secs = Math.max(0, Math.min(parseInt(node.seconds, 10) || 0, 86400)); if (secs <= 0) { nextsOf(node).forEach((x) => queue.push(x)); continue; } delayNode = { nodeId: id, next: (Array.isArray(node.next) ? node.next : (node.next || null)), secs }; continue; }
+    if (node.type === "appointment") { const ok = await trySendFlowNative(a, c, node); if (!ok) await sendText(a, c, (node.text || "📅 Appointment booking") + "\n\n⚠ Flow not configured yet."); s.variables.__appt_node = id; awaitNode = { type: "appointment", nodeId: id }; const dn = nextsOf(node); if (dn.length) s.variables.__appt_next = dn; continue; }
+    if (node.type === "buttons" || node.type === "list") {
+      if (node.type === "buttons") { if (node.text_menu) { await sendHeaderMedia(a, c, node); const opts = (node.buttons || []).map((b, i) => `${i + 1}. ${b.title}`).join("\n"); await sendText(a, c, withHeaderFooter(node, (node.text || "Choose an option:") + "\n\n" + opts)); } else { await sendHeaderMedia(a, c, node); await sendOptions(a, c, withHeaderFooter(node, node.text), (node.buttons || []).map((b) => b.title)); } }
+      else { if (node.text_menu) { await sendHeaderMedia(a, c, node); const rows = listRows(node); const opts = rows.map((r, i) => r.description ? `${i + 1}. ${r.title} — ${r.description}` : `${i + 1}. ${r.title}`).join("\n"); await sendText(a, c, withHeaderFooter(node, (node.body || "Choose an option:") + "\n\n" + opts)); } else { const okl = await trySendListNative(a, c, node); if (!okl) { await sendHeaderMedia(a, c, node); const rows = listRows(node); let lbody = node.body || ""; if (rows.some((r) => r.description)) lbody += "\n\n" + rows.map((r) => r.description ? `▸ ${r.title} — ${r.description}` : `▸ ${r.title}`).join("\n"); await sendOptions(a, c, withHeaderFooter(node, lbody), rows.map((r) => r.title)); } } }
+      s.variables.__opts = id; s.variables.__menus = [...(s.variables.__menus || []).filter((x) => x !== id), id].slice(-8);
+      const dn = nextsOf(node); if (dn.length) dn.forEach((x) => queue.push(x)); else awaitNode = { type: node.type, nodeId: id }; continue;
+    }
+    if (node.type === "form") { if (node.intro) await sendText(a, c, node.intro); const ff = (node.fields || []).filter((fd) => (fd.label || "").trim()); if (!ff.length) { nextsOf(node).forEach((x) => queue.push(x)); continue; } s.variables.__form_idx = 0; s.variables.__form_answers = {}; await sendFormField(a, c, ff[0]); awaitNode = { type: "form", nodeId: id }; continue; }
+    if (node.type === "catalog") { const prods = (node.products || []).filter((p) => (p.name || "").trim()); if (!prods.length) { nextsOf(node).forEach((x) => queue.push(x)); continue; } if (node.intro) await sendText(a, c, node.intro); s.variables.__cart = []; s.variables.__cat_stage = "pick"; s.variables.__form_idx = 0; s.variables.__form_answers = {}; await sendCatalogProducts(a, c, prods); awaitNode = { type: "catalog", nodeId: id }; continue; }
+    if (node.type === "question") { await sendText(a, c, node.text); s.variables.__q_token = Math.random().toString(36).slice(2); awaitNode = { type: "question", nodeId: id }; continue; }
+  }
+  if (delayNode) { s.variables.__delay_token = Math.random().toString(36).slice(2); s.variables.__delay_next = delayNode.next; s.variables.__delay_secs = delayNode.secs; }
+  if (awaitNode) { s.awaiting = awaitNode.type; s.nodeId = awaitNode.nodeId; } else if (delayNode) { s.awaiting = "delay"; s.nodeId = delayNode.nodeId; } else { s.awaiting = null; s.nodeId = null; }
+}
+async function advance(a, c, s, def) { await runFlow(a, c, s, def); await saveSession(a, c, s); scheduleQuestionTimeout(a, c, s, def); scheduleDelayResume(a, c, s, def); }
+function scheduleDelayResume(a, c, s, def) {
+  const token = s.variables && s.variables.__delay_token; if (!token) return;
+  const secs = Math.max(0, Math.min(parseInt(s.variables.__delay_secs, 10) || 0, 86400)); if (secs <= 0) return;
+  const nextId = s.variables.__delay_next || null; const inboxId = (s.variables.__inbox != null ? s.variables.__inbox : null); const publishedAt = s.flowPublishedAt;
+  setTimeout(async () => {
+    try { const cur = await getSession(a, c); if (!cur) return; const vars = typeof cur.variables === "string" ? JSON.parse(cur.variables) : (cur.variables || {}); if (vars.__delay_token !== token) return; const fr = await cachedPublishedFlow(a, inboxId); if (!fr) return; if (new Date(fr.published_at).toISOString() !== publishedAt) return; const curDef = parseDef(fr.definition); const ns = toSession(cur, publishedAt); ns.nodeId = nextId; ns.awaiting = null; await runFlow(a, c, ns, curDef); await saveSession(a, c, ns); scheduleQuestionTimeout(a, c, ns, curDef); scheduleDelayResume(a, c, ns, curDef); } catch (e) { console.error("delayresume", e.message); }
+  }, secs * 1000);
+}
+function scheduleQuestionTimeout(a, c, s, def) {
+  if (s.awaiting !== "question") return; const node = def.nodes[s.nodeId]; if (!node || !node.timeout_seconds) return;
+  const token = s.variables.__q_token; const ms = Math.max(1, Math.min(parseInt(node.timeout_seconds, 10) || 0, 3600)) * 1000;
+  setTimeout(async () => {
+    try { const cur = await getSession(a, c); if (!cur || cur.awaiting !== "question") return; const vars = typeof cur.variables === "string" ? JSON.parse(cur.variables) : (cur.variables || {}); if (vars.__q_token !== token) return; const ns = toSession(cur, s.flowPublishedAt); if (node.timeout_message) await sendText(a, c, node.timeout_message); if (node.continue_on_timeout) { ns.awaiting = null; ns.nodeId = node.next || null; await runFlow(a, c, ns, def); } else { ns.awaiting = null; ns.nodeId = null; } await saveSession(a, c, ns); } catch (e) { console.error("qtimeout", e.message); }
+  }, ms);
+}
+function matchChoice(node, choice) {
+  const t = norm(choice); if (!node) return null; const raw = String(choice).trim();
+  const byNum = (arr) => { if (/^\d+$/.test(raw)) { const n = parseInt(raw, 10); if (n >= 1 && n <= arr.length) return arr[n - 1]; } return null; };
+  if (node.type === "buttons") { const arr = node.buttons || []; const hit = byNum(arr) || arr.find((x) => norm(x.title) === t); return hit ? (hit.next || null) : null; }
+  if (node.type === "list") { const arr = listRows(node); const hit = byNum(arr) || arr.find((x) => norm(x.title) === t); return hit ? (hit.next || null) : null; }
+  return null;
+}
+function resolveMenuChoice(def, s, text) {
+  const vars = s.variables || {}; const order = []; if (s.awaiting === "buttons" || s.awaiting === "list") order.push(s.nodeId); if (vars.__opts) order.push(vars.__opts); const menus = vars.__menus || []; for (let i = menus.length - 1; i >= 0; i--) order.push(menus[i]); const tried = new Set();
+  for (const id of order) { if (id == null || tried.has(id)) continue; tried.add(id); const next = matchChoice(def.nodes[id], text); if (next) return { menuId: id, next }; }
+  return null;
+}
+async function handleFlowSubmission(accountId, conversationId, s, def, nfmResponse) {
+  let payload = {}; try { payload = typeof nfmResponse.response_json === "string" ? JSON.parse(nfmResponse.response_json) : (nfmResponse.response_json || {}); } catch (e) {}
+  const slotVal = String(payload.slot || ""); const [date, time] = slotVal.split("|");
+  const cfg = (await getApptSettings(accountId)) || {};
+  const questions = (cfg.questions ? (typeof cfg.questions === "string" ? JSON.parse(cfg.questions) : cfg.questions) : []);
+  const mapped = getMappedQuestions(questions);
+  const answers = {}; for (const m of mapped) { if (payload[m.sanitized] != null) answers[m.originalKey] = payload[m.sanitized]; }
+  if (!date || !time) { await sendText(accountId, conversationId, "Booking mein date/time nahi mila. Dobara try karein."); return; }
+  const result = await bookAppointmentInternal(accountId, { date, time, answers, convId: conversationId });
+  if (!result.ok) { if (result.error === "slot_taken") await sendText(accountId, conversationId, "😔 Yeh slot abhi kisi aur ne le liya."); else await sendText(accountId, conversationId, "Booking nahi ho saki: " + (result.error || "unknown")); return; }
+  const answerLines = Object.entries(answers).map(([k, v]) => `👤 ${k}: ${v}`).join("\n");
+  const msg = `✅ *Appointment Confirmed!*\n\n📅 Date: ${fmtDateLabel(date)}\n⏰ Time: ${fmtTimeLabel(time)}${answerLines ? "\n" + answerLines : ""}\n\nHum aapka intezaar karenge! 🙌`;
+  await sendText(accountId, conversationId, msg);
+  delete s.variables.__appt_node; const nextIds = s.variables.__appt_next || []; delete s.variables.__appt_next; s.awaiting = null; s.nodeId = nextIds && nextIds.length ? nextIds : null; await advance(accountId, conversationId, s, def);
+}
+app.post("/webhook", async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const event = req.body; const accountId = event.account?.id; const conversationId = event.conversation?.id; const inboxId = event.conversation?.inbox_id ?? event.inbox?.id ?? event.conversation?.inbox?.id ?? null;
+    if (!accountId || !conversationId) return;
+    const _sender = event.sender || event.conversation?.meta?.sender || {}; const senderVars = { senderName: _sender.name || _sender.available_name || "", senderId: _sender.phone_number || _sender.identifier || "", receiverId: event.conversation?.meta?.channel_source_id || event.inbox?.phone_number || "", };
+    const flowRow = await cachedPublishedFlow(accountId, inboxId); if (!flowRow) return; const def = parseDef(flowRow.definition); if (!def.start) return;
+    const flowPublishedAt = new Date(flowRow.published_at).toISOString(); const session = await getSession(accountId, conversationId);
+    const nfm = event.content_attributes?.nfm_reply || event.additional_attributes?.nfm_reply || null;
+    if (nfm && session) { const s = toSession(session, flowPublishedAt); s.variables.__inbox = inboxId; Object.assign(s.variables, senderVars); if (session.awaiting === "appointment") { await handleFlowSubmission(accountId, conversationId, s, def, nfm); return; } }
+    const submitted = event.content_attributes?.submitted_values;
+    if (event.event === "message_updated" && Array.isArray(submitted) && submitted.length > 0) {
+      const choice = (submitted[0].value || submitted[0].title || "").trim();
+      if (session) {
+        const s = toSession(session, flowPublishedAt); s.variables.last_message = choice; s.variables.message = choice; s.variables.__inbox = inboxId; Object.assign(s.variables, senderVars);
+        if (session.awaiting === "catalog" || session.awaiting === "form") { if (!event.content || !event.content.trim()) { event.content = choice; event.event = "message_created"; event.message_type = "incoming"; } else return; }
+        else { const mc = resolveMenuChoice(def, s, choice); if (mc) { const mNode = def.nodes[mc.menuId]; s.nodeId = mc.next; s.awaiting = null; await advance(accountId, conversationId, s, def); if (mNode && mNode.loop_menu && !s.awaiting && !s.nodeId) { s.nodeId = mc.menuId; await advance(accountId, conversationId, s, def); } } else if (s.awaiting === "buttons" || s.awaiting === "list") { const cur = def.nodes[s.nodeId]; if (cur && cur.loop_menu) { s.awaiting = null; await advance(accountId, conversationId, s, def); } } return; }
+      } else return;
+    }
+    if (event.event !== "message_created") return; if (event.message_type !== "incoming") return; const text = (event.content || "").trim();
+    const isRepublished = session && session.flow_published_at && new Date(session.flow_published_at).getTime() < new Date(flowPublishedAt).getTime();
+    if (!session || isRepublished) { const trig = def.trigger || {}; if (trig.keywords && trig.keywords.length && !matchKeywords(text, trig.keywords, trig.fuzzy, trig.sensitivity)) return; openConversation(accountId, conversationId); const s = { nodeId: def.start, awaiting: null, variables: { last_message: text, message: text, __inbox: inboxId, ...senderVars }, flowPublishedAt }; await advance(accountId, conversationId, s, def); return; }
+    const s = toSession(session, flowPublishedAt); s.variables.last_message = text; s.variables.message = text; s.variables.__inbox = inboxId; Object.assign(s.variables, senderVars);
+    if (session.awaiting === "appointment") { await saveSession(accountId, conversationId, s); return; }
+    if (session.awaiting === "question") { const node = def.nodes[session.node_id]; if (node && node.response_format && !validateFormat(text, node.response_format)) { await sendText(accountId, conversationId, substVars(node.text, s.variables)); await saveSession(accountId, conversationId, s); return; } if (node?.save_as) s.variables[node.save_as] = text; s.awaiting = null; s.nodeId = node?.next || null; await advance(accountId, conversationId, s, def); return; }
+    if (session.awaiting === "form") {
+      const fnode = def.nodes[session.node_id]; const ff = ((fnode && fnode.fields) || []).filter((fd) => (fd.label || "").trim()); let fidx = s.variables.__form_idx || 0; const fans = s.variables.__form_answers || {}; const cur = ff[fidx];
+      if (cur) { const k = cur.key || ("field_" + (fidx + 1)); fans[k] = text; s.variables[k] = text; } fidx++; s.variables.__form_answers = fans; s.variables.__form_idx = fidx;
+      if (fidx < ff.length) { await sendFormField(accountId, conversationId, { ...ff[fidx], label: substVars(ff[fidx].label, s.variables) }); await saveSession(accountId, conversationId, s); return; }
+      const summary = "📋 *Form submitted:*\n" + ff.map((fd, i) => `• ${fd.key || ("field_" + (i + 1))}: ${fans[fd.key || ("field_" + (i + 1))] || "-"}`).join("\n");
+      await sendText(accountId, conversationId, summary); if (fnode && fnode.submit_message) await sendText(accountId, conversationId, fnode.submit_message);
+      if (fnode && fnode.sheet_url) { try { const _ci = await getConvInfo(accountId, conversationId); await appendToSheet(fnode.sheet_url, { Time: new Date().toLocaleString(), Phone: (_ci && _ci.number) || "", ...fans }); } catch (e) {} }
+      delete s.variables.__form_idx; delete s.variables.__form_answers; s.awaiting = null; s.nodeId = (fnode && fnode.next) || null; await advance(accountId, conversationId, s, def); return;
+    }
+    if (session.awaiting === "catalog") {
+      const cnode = def.nodes[session.node_id]; const prods = ((cnode && cnode.products) || []).filter((p) => (p.name || "").trim()); const cart = s.variables.__cart || []; const stage = s.variables.__cat_stage || "pick";
+      const addL = ((cnode && cnode.add_more_label) || "➕ Add more").slice(0, 20); const coL = ((cnode && cnode.checkout_label) || "✅ Confirm").slice(0, 20); const t = (text || "").trim();
+      if (stage === "pick") { let idx = -1; const num = parseInt(t.replace(/[^\d]/g, ""), 10); if (num >= 1 && num <= prods.length && String(num) === t.replace(/[^\d]/g, "")) idx = num - 1; if (idx < 0) idx = prods.findIndex((p) => catProductTitle(p) === t || (p.name || "").trim().toLowerCase() === t.toLowerCase()); if (idx < 0) { await sendCatalogProducts(accountId, conversationId, prods); await saveSession(accountId, conversationId, s); return; } s.variables.__cat_pick = idx; s.variables.__cat_stage = "qty"; await sendCatalogQty(accountId, conversationId, cnode, prods[idx]); await saveSession(accountId, conversationId, s); return; }
+      if (stage === "qty") { const qty = parseInt(t.replace(/[^\d]/g, ""), 10); const pIdx = s.variables.__cat_pick; const prod = prods[pIdx]; if (!prod || !qty || qty < 1) { if (prod) await sendCatalogQty(accountId, conversationId, cnode, prod); await saveSession(accountId, conversationId, s); return; } const lineTotal = (Number(prod.price) || 0) * qty; const existing = cart.find((it) => it.name === prod.name); if (existing) existing.qty = (Number(existing.qty) || 0) + qty; else cart.push({ name: prod.name, price: Number(prod.price) || 0, qty }); s.variables.__cart = cart; await sendText(accountId, conversationId, buildCartMsg(cnode, cart, prod, qty, lineTotal)); s.variables.__cat_stage = "more"; await sendCatalogMore(accountId, conversationId, cnode); await saveSession(accountId, conversationId, s); return; }
+      if (stage === "more") { if (t === addL || /add|aur|more|zyada/i.test(t)) { s.variables.__cat_stage = "pick"; await sendCatalogProducts(accountId, conversationId, prods); await saveSession(accountId, conversationId, s); return; } if (t === coL || /check?out|complete|done|order|confirm|ho?gaya|bas/i.test(t)) { const ff = ((cnode && cnode.fields) || []).filter((fd) => (fd.label || "").trim()); s.variables.__cat_stage = "form"; s.variables.__form_idx = 0; s.variables.__form_answers = {}; if (ff.length) { await sendFormField(accountId, conversationId, ff[0]); await saveSession(accountId, conversationId, s); return; } await finishCatalogOrder(accountId, conversationId, s, def, cnode, cart, {}); return; } await sendCatalogMore(accountId, conversationId, cnode); await saveSession(accountId, conversationId, s); return; }
+      if (stage === "form") { const ff = ((cnode && cnode.fields) || []).filter((fd) => (fd.label || "").trim()); let fidx = s.variables.__form_idx || 0; const fans = s.variables.__form_answers || {}; const cur = ff[fidx]; if (cur) { const k = cur.key || ("field_" + (fidx + 1)); fans[k] = t; s.variables[k] = t; } fidx++; s.variables.__form_answers = fans; s.variables.__form_idx = fidx; if (fidx < ff.length) { await sendFormField(accountId, conversationId, { ...ff[fidx], label: substVars(ff[fidx].label, s.variables) }); await saveSession(accountId, conversationId, s); return; } await finishCatalogOrder(accountId, conversationId, s, def, cnode, cart, fans); return; }
+      await saveSession(accountId, conversationId, s); return;
+    }
+    const mc = resolveMenuChoice(def, s, text);
+    if (mc) { const mNode = def.nodes[mc.menuId]; s.nodeId = mc.next; s.awaiting = null; await advance(accountId, conversationId, s, def); if (mNode && mNode.loop_menu && !s.awaiting && !s.nodeId) { s.nodeId = mc.menuId; await advance(accountId, conversationId, s, def); } return; }
+    if (session.awaiting === "buttons" || session.awaiting === "list") { const cur = def.nodes[session.node_id]; if (cur && cur.loop_menu) { s.nodeId = session.node_id; s.awaiting = null; await advance(accountId, conversationId, s, def); } else { await saveSession(accountId, conversationId, s); } return; }
+    return;
+  } catch (e) { console.error("webhook error:", e.message); }
+});
+
+/* =====================================================================
+   WHATSAPP TEMPLATES  —  ChatsSync
+   =====================================================================
+   Builder (builder.chatssync.online) in raaston ko bulata hai:
+       GET    /api/templates?account_id=&inbox_id=
+       GET    /api/templates/meta?account_id=&inbox_id=
+       POST   /api/templates
+       DELETE /api/templates?...&name=
+       POST   /api/templates/upload-media   (multipart: file)
+
+   AHEM — builder HAR jawab mein `ok: true` dhoondta hai:
+       if (j.ok) setList(j.templates); else setErr("Couldn't load...")
+   Pehle main sirf { templates: [...] } bhej raha tha, `ok` ke bagair.
+   Isi liye data aane ke BAWAJOOD builder "Couldn't load templates"
+   dikhata tha. Ab har jawab mein ok hai.
+
+   Aur builder meta se `phone` parhta hai (meta?.phone) — main
+   `phone_number` bhej raha tha, isi liye Phone aur WABA ID khali
+   dikhte the. Ab dono bhejte hain.
+
+   Ye hissa poori tarah ALAG hai:
+     • koi purana route, function ya variable nahi badla
+     • multer apna alag (tplUpload) — Gallery ka `upload` nahi chhua
+     • getWaCreds() istemal hota hai jo pehle se maujood hai
+     • har inbox ka APNA token aur APNA app id (multi-tenant)
+     • kuch fail ho to sirf yehi raaste mutasir honge — chatbot,
+       flows, appointments, gallery, webhook jyon ke tyon
+   ===================================================================== */
+
+const tplUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 60 * 1024 * 1024 },
+});
+
+/* ---- WABA id: har inbox ka apna, 10 min cache ---- */
+const wabaCache = new Map();
+
+async function getWabaId(accountId, inboxId, creds) {
+  const key = `${accountId}:${inboxId}`;
+  const hit = wabaCache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.id;
+
+  let wabaId = null;
+
+  try {
+    const r = await cw.get(
+      `${CHATWOOT_BASE_URL}/api/v1/accounts/${accountId}/inboxes/${inboxId}`,
+      { headers: { api_access_token: ADMIN_TOKEN }, timeout: 12000 }
+    );
+    const d = r.data || {};
+    const pc = d.provider_config || (d.channel && d.channel.provider_config) || {};
+    wabaId = pc.business_account_id || pc.waba_id || pc.whatsapp_business_account_id || null;
   } catch (e) {
     /* ignore */
   }
-  csApplyTheme(dark);
-  if (!window.__csThemeHooked) {
-    window.__csThemeHooked = true;
-    window.addEventListener("message", (e) => {
-      if (e && e.data && e.data.type === "chatssync:theme") {
-        csApplyTheme(e.data.theme === "dark");
+
+  if (!wabaId) {
+    const db = await getChatwootDb();
+    if (db) {
+      try {
+        const q = await db.query(
+          "SELECT cw.provider_config AS pc FROM channel_whatsapp cw JOIN inboxes i ON i.channel_id = cw.id WHERE i.id = $1 AND i.channel_type = 'Channel::Whatsapp' LIMIT 1",
+          [inboxId]
+        );
+        const pc = (q.rows[0] && q.rows[0].pc) || {};
+        wabaId = pc.business_account_id || pc.waba_id || pc.whatsapp_business_account_id || null;
+      } catch (e) {
+        /* ignore */
       }
-    });
-    document.addEventListener("DOMContentLoaded", () =>
-      csApplyTheme(!document.documentElement.classList.contains("cs-light"))
-    );
+    }
   }
-})();
-const NC = { start: "#5B8DEF", text: "#4C84FF", buttons: "#2EA66B", list: "#9B6DF0", media: "#C8902B", cta: "#3A7DE0", question: "#4F90E8", delay: "#7C8696", condition: "#CC6A2E", tag: "#D9694A", form: "#2B9F94", catalog: "#E0912B", appointment: "#0EA5E9", stop: "#E5524A" };
-const ACCENT = "#4C84FF";
 
-const OPERATORS = [
-  ["equals", "equals"], ["not_equals", "not equals"], ["contains", "contains"], ["not_contains", "does not contain"],
-  ["starts_with", "starts with"], ["ends_with", "ends with"], ["greater_than", "greater than"], ["less_than", "less than"],
-  ["is_email", "is email"], ["is_phone", "is phone number"], ["regex", "matches regex"], ["fuzzy", "fuzzy match"],
-];
-const RESPONSE_FORMATS = [["any", "Any response"], ["text", "Text"], ["number", "Number"], ["email", "Email"], ["phone", "Phone number"]];
-const HEADER_TYPES = [["none", "None"], ["text", "Text"], ["image", "Image"], ["video", "Video"], ["document", "Document"]];
+  if (!wabaId && creds && creds.phoneId && creds.token) {
+    try {
+      const r = await cw.get(`https://graph.facebook.com/${WA_VER}/${creds.phoneId}`, {
+        params: { fields: "whatsapp_business_account_id" },
+        headers: { Authorization: `Bearer ${creds.token}` },
+        timeout: 15000,
+      });
+      wabaId = (r.data && r.data.whatsapp_business_account_id) || null;
+    } catch (e) {
+      /* ignore */
+    }
+  }
 
-function hexA(hex, a) { const h = hex.replace("#", ""); const f = h.length === 3 ? h.split("").map((c) => c + c).join("") : h; const n = parseInt(f, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
-
-function useIsMobile(bp = 768) {
-  const [m, setM] = useState(typeof window !== "undefined" && window.innerWidth < bp);
-  useEffect(() => { const f = () => setM(window.innerWidth < bp); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, [bp]);
-  return m;
+  wabaCache.set(key, { id: wabaId, exp: Date.now() + (wabaId ? 600000 : 120000) });
+  return wabaId;
 }
 
-const GTYPE = {
-  image: { icon: "🖼️", label: "Image", color: NC.text },
-  video: { icon: "🎬", label: "Video", color: NC.question },
-  audio: { icon: "🎵", label: "Audio", color: NC.buttons },
-  document: { icon: "📄", label: "Doc", color: NC.media },
-};
-function guessType(url) {
-  const ext = (String(url).split("?")[0].split(".").pop() || "").toLowerCase();
-  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(ext)) return "image";
-  if (["mp4", "webm", "mov", "mkv", "avi"].includes(ext)) return "video";
-  if (["mp3", "ogg", "wav", "m4a", "aac", "opus"].includes(ext)) return "audio";
-  return "document";
-}
-function fmtSize(b) { if (b == null) return ""; if (b < 1024) return b + " B"; if (b < 1048576) return Math.round(b / 1024) + " KB"; return (b / 1048576).toFixed(1) + " MB"; }
-function copyText(text) {
+/* ---- App id: media upload ke liye. Har client ka APNA —
+       uske apne token se poocha jaata hai, koi env var nahi ---- */
+const appIdCache = new Map();
+
+async function getAppId(token) {
+  if (!token) return null;
+  const key = token.slice(-24);
+  const hit = appIdCache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.id;
+
+  let appId = null;
   try {
-    const ta = document.createElement("textarea");
-    ta.value = text; ta.style.position = "fixed"; ta.style.top = "-9999px"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    const ok = document.execCommand("copy"); document.body.removeChild(ta); return ok;
-  } catch { return false; }
-}
-
-function injectFont() {
-  if (!document.getElementById("cs-inter")) {
-    const l = document.createElement("link"); l.id = "cs-inter"; l.rel = "stylesheet";
-    l.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
-    document.head.appendChild(l);
+    const r = await cw.get(`https://graph.facebook.com/${WA_VER}/debug_token`, {
+      params: { input_token: token },
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 15000,
+    });
+    appId = (r.data && r.data.data && r.data.data.app_id) || null;
+  } catch (e) {
+    /* ignore */
   }
-  document.body.style.margin = "0"; document.body.style.fontFamily = T.font;
-  if (!document.getElementById("cs-viewport")) {
-    const mvp = document.querySelector('meta[name="viewport"]');
-    if (!mvp) { const m = document.createElement("meta"); m.name = "viewport"; m.id = "cs-viewport"; m.content = "width=device-width, initial-scale=1, maximum-scale=1"; document.head.appendChild(m); }
+
+  appIdCache.set(key, { id: appId, exp: Date.now() + (appId ? 3600000 : 120000) });
+  return appId;
+}
+
+/* ---- har route ke shuru mein ---- */
+async function tplContext(req, res) {
+  const accountId = parseInt(req.query.account_id || (req.body || {}).account_id, 10);
+  const inboxId = parseInt(req.query.inbox_id || (req.body || {}).inbox_id, 10);
+
+  if (!accountId || !inboxId) {
+    res.status(400).json({ ok: false, error: "account_id aur inbox_id dono chahiye" });
+    return null;
   }
-}
-function injectStyles() {
-  if (document.getElementById("cs-dark")) return;
-  const s = document.createElement("style"); s.id = "cs-dark";
-  s.textContent = `
-  .react-flow__controls{box-shadow:0 4px 16px rgba(0,0,0,.4);border-radius:8px;overflow:hidden;border:1px solid ${D.border};}
-  .react-flow__controls-button{background:${D.panel2};border-bottom:1px solid ${D.border};}
-  .react-flow__controls-button:hover{background:var(--cs-ctrl-hover);}
-  .react-flow__controls-button svg{fill:var(--cs-ctrl-ico);}
-  .react-flow__minimap{background:${D.bg} !important;border:1px solid ${D.border};border-radius:8px;}
-  .react-flow__attribution{background:transparent;color:var(--cs-attr);}
-  .react-flow__edge-path{stroke:var(--cs-edge);stroke-width:1.8;}
-  .react-flow__edge.selected .react-flow__edge-path,.react-flow__edge:hover .react-flow__edge-path{stroke:${ACCENT};}
-  .react-flow__handle{transition:transform .1s;}
-  .react-flow__handle:hover{transform:scale(1.25);}
-  .cs-pal:hover{border-color:var(--cs-border2)!important;background:var(--cs-hover)!important;}
-  .cs-in{background:${D.input};border:1px solid var(--cs-inborder);color:${D.text};box-sizing:border-box;max-width:100%;}
-  .cs-in:focus{outline:none;border-color:${ACCENT};box-shadow:0 0 0 3px ${hexA(ACCENT, .16)};}
-  .cs-in::placeholder{color:${D.faint};}
-  .cs-gcard:hover{border-color:var(--cs-border2)!important;transform:translateY(-2px);}
-  .cs-pub:hover{filter:brightness(1.07);}
-  .cs-row:hover{background:var(--cs-hover);}
-  .cs-tcard:hover{border-color:var(--cs-border2)!important;transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.4)!important;}
-  .no-scrollbar::-webkit-scrollbar{display:none;}
-  .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none;}
-  `;
-  document.head.appendChild(s);
-}
 
-const nodeBox = (accent, sel) => ({ position: "relative", background: D.card, borderRadius: 12, width: 256, border: `1px solid ${sel ? accent : D.border}`, boxShadow: sel ? `0 0 0 1px ${accent}, 0 10px 26px rgba(0,0,0,.5)` : `0 1px 2px rgba(0,0,0,.35), 0 6px 16px rgba(0,0,0,.22)`, fontFamily: T.font, overflow: "hidden", transition: "box-shadow .15s, border-color .15s" });
-const nbody = { padding: "4px 13px 12px", color: D.sub, whiteSpace: "pre-wrap", minHeight: 12, lineHeight: 1.45, fontSize: 12 };
-const small = { color: D.faint, fontSize: 11, marginTop: 2, whiteSpace: "pre-wrap" };
-const hStyle = (a) => ({ width: 12, height: 12, background: D.bg, border: `2px solid ${a}` });
-const rightHandle = (a) => ({ top: "50%", right: -7, transform: "translateY(-50%)", ...hStyle(a) });
-const itemPill = { position: "relative", margin: "7px 13px", padding: "9px 30px 9px 12px", border: `1px solid ${D.border}`, borderRadius: 9, background: D.input, color: D.text, fontSize: 12, lineHeight: 1.3, minHeight: 18 };
-const EdgeCtx = createContext(null);
-
-function Hdr({ a, icon, title }) {
-  return (<div style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 13px 7px" }}>
-    <div style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: hexA(a, .14), color: a, fontSize: 12.5 }}>{icon}</div>
-    <div style={{ color: D.text, fontWeight: 600, fontSize: 12.5 }}>{title}</div>
-  </div>);
-}
-function TopLine({ a }) { return <div style={{ height: 2, background: a, opacity: .8 }} />; }
-function HeaderPreview({ data }) {
-  const h = data.header || {}; if (!h.type || h.type === "none") return null;
-  if (h.type === "text") return <div style={{ margin: "0 13px 2px", fontSize: 12, fontWeight: 700, color: D.text }}>{h.value || "Header"}</div>;
-  return <div style={{ margin: "2px 13px", fontSize: 11, color: D.faint, display: "flex", gap: 6, alignItems: "center" }}><span>{GTYPE[h.type]?.icon || "📎"}</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(h.value || "").split("/").pop() || h.type + " header"}</span></div>;
-}
-function FooterPreview({ data }) { return data.footer ? <div style={{ margin: "2px 13px 0", fontSize: 11, color: D.faint }}>{data.footer}</div> : null; }
-
-function eachListRow(sections, cb) { let gi = 0; (sections || []).forEach((sec, si) => { (sec.rows || []).forEach((row, ri) => { cb(row, gi, si, ri); gi++; }); }); }
-function listRowCount(sections) { let n = 0; (sections || []).forEach((s) => (n += (s.rows || []).length)); return n; }
-
-function StartNode({ data }) { const a = NC.start; return (<div style={nodeBox(a, false)}><TopLine a={a} /><Hdr a={a} icon="⚡" title="On Message" /><div style={nbody}>{data.keywords ? `Keywords: ${data.keywords}` : "Starts on the first message"}{data.fuzzy ? <div style={{ marginTop: 4, fontSize: 11, color: a }}>Fuzzy matching on</div> : null}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
-function TextNode({ data, selected }) { const a = NC.text; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="💬" title="Send Text" /><div style={nbody}>{data.text || "…"}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
-function ButtonsNode({ data, selected }) {
-  const a = NC.buttons; const buttons = data.buttons || [];
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🔘" title="Send Buttons" /><HeaderPreview data={data} /><div style={nbody}>{data.text || "…"}</div>
-    {buttons.map((b, i) => (<div key={i} style={itemPill}>{b.title || `Button ${i + 1}`}<Handle type="source" position={Position.Right} id={`btn-${i}`} style={rightHandle(a)} /></div>))}
-    <FooterPreview data={data} /><div style={{ height: 8 }} /><Handle type="source" position={Position.Bottom} id="default" style={hStyle(a)} /></div>);
-}
-function ListNode({ data, selected }) {
-  const a = NC.list; const rows = [];
-  eachListRow(data.sections, (row, gi) => { rows.push(<div key={gi} style={itemPill}><div style={{ fontWeight: 600 }}>{row.title || `Row ${gi + 1}`}</div>{row.description ? <div style={small}>{row.description}</div> : null}<Handle type="source" position={Position.Right} id={`row-${gi}`} style={rightHandle(a)} /></div>); });
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="📋" title="Send List" /><HeaderPreview data={data} /><div style={nbody}>{data.body || "…"}{data.button ? <div style={{ marginTop: 4, fontSize: 11, color: a }}>▾ {data.button}</div> : null}</div>{rows}<FooterPreview data={data} /><div style={{ height: 8 }} /><Handle type="source" position={Position.Bottom} id="default" style={hStyle(a)} /></div>);
-}
-function MediaNode({ data, selected }) {
-  const a = NC.media;
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🖼️" title="Send Media" />
-    <div style={{ padding: "2px 13px 12px" }}>
-      {data.url ? (data.mediaType === "image"
-        ? <img src={data.url} alt="" style={{ width: "100%", height: 92, objectFit: "cover", borderRadius: 8, border: `1px solid ${D.border}` }} />
-        : <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: D.sub, padding: "6px 0" }}><span>{GTYPE[data.mediaType]?.icon || "📄"}</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name || "media"}</span></div>)
-        : <div style={{ fontSize: 12, color: D.faint }}>No media selected</div>}
-      {data.caption ? <div style={{ marginTop: 6, fontSize: 12, color: D.sub, whiteSpace: "pre-wrap" }}>{data.caption}</div> : null}
-    </div>
-    <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
-}
-function CtaNode({ data, selected }) { const a = NC.cta; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🔗" title="Send CTA" /><HeaderPreview data={data} /><div style={nbody}>{data.body || "…"}{data.url ? <div style={{ marginTop: 6, padding: "6px 10px", border: `1px solid ${D.border}`, borderRadius: 8, background: D.input, color: a, fontSize: 12, textAlign: "center" }}>🔗 {data.display || "Open link"}</div> : null}</div><FooterPreview data={data} /><div style={{ height: 4 }} /><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
-function QuestionNode({ data, selected }) { const a = NC.question; const fmt = (RESPONSE_FORMATS.find((f) => f[0] === (data.responseFormat || "any")) || ["", "Any"])[1]; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="❓" title="Ask Question" /><div style={nbody}>{data.text || "…"}<div style={{ marginTop: 6, fontSize: 11, color: a }}>Expects: {fmt}{data.saveAs ? ` → ${data.saveAs}` : ""}</div></div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
-function DelayNode({ data, selected }) { const a = NC.delay; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="⏱️" title="Delay" /><div style={nbody}>Wait {data.value || 0} {data.unit || "seconds"}</div><Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>); }
-function ConditionNode({ data, selected }) {
-  const a = NC.condition; const conds = data.conditions || [];
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🔀" title="Condition" />
-    <div style={{ padding: "2px 13px 4px", fontSize: 11.5, color: D.sub }}>Match <b style={{ color: a }}>{data.match === "any" ? "ANY" : "ALL"}</b> of:</div>
-    <div style={{ padding: "0 13px 6px" }}>{conds.map((c, i) => { const op = (OPERATORS.find((o) => o[0] === (c.operator || "equals")) || ["", "?"])[1]; return (<div key={i} style={{ fontSize: 11.5, color: D.text, marginBottom: 3 }}>{c.first || "{{last_message}}"} <span style={{ color: a }}>{op}</span> {c.second ? `"${c.second}"` : "…"}</div>); })}</div>
-    <div style={{ ...itemPill, borderColor: hexA(NC.buttons, .5) }}><span style={{ color: NC.buttons, fontWeight: 600 }}>✓ True</span><Handle type="source" position={Position.Right} id="cond-true" style={rightHandle(NC.buttons)} /></div>
-    <div style={{ ...itemPill, borderColor: hexA(NC.stop, .5) }}><span style={{ color: NC.stop, fontWeight: 600 }}>✕ False</span><Handle type="source" position={Position.Right} id="cond-false" style={rightHandle(NC.stop)} /></div>
-    <div style={{ height: 8 }} /></div>);
-}
-function TagNode({ data, selected }) {
-  const a = NC.tag; const labels = (data.labels || "").split(",").map((x) => x.trim()).filter(Boolean);
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🏷️" title="Update Tag" />
-    <div style={{ padding: "2px 13px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {labels.length ? labels.map((l, i) => (<span key={i} style={{ padding: "3px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: hexA(a, .15), color: a, border: `1px solid ${hexA(a, .4)}` }}>{l}</span>)) : <span style={{ fontSize: 12, color: D.faint }}>No tags selected</span>}
-    </div>
-    <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
-}
-function FormNode({ data, selected }) {
-  const a = NC.form; const fields = (data.fields || []).filter((f) => (f.label || "").trim());
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="📝" title="Send Form" />
-    <div style={nbody}>{data.intro || "Collect details from the customer"}</div>
-    <div style={{ padding: "0 13px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
-      {fields.length ? fields.map((fd, i) => (<div key={i} style={{ fontSize: 11.5, color: D.text, display: "flex", gap: 6, alignItems: "center" }}><span style={{ color: a, fontWeight: 700 }}>{i + 1}.</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fd.label}</span></div>)) : <span style={{ fontSize: 12, color: D.faint }}>No fields yet</span>}
-    </div>
-    <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
-}
-function StopNode({ data, selected }) { const a = NC.stop; return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🛑" title="Stop Chatbot" /><div style={nbody}>{data.text || "(no message — hands over to a human)"}</div></div>); }
-function CatalogNode({ data, selected }) {
-  const a = NC.catalog; const products = (data.products || []).filter((p) => (p.name || "").trim());
-  return (<div style={nodeBox(a, selected)}><Handle type="target" position={Position.Top} style={hStyle(a)} /><TopLine a={a} /><Hdr a={a} icon="🛒" title="Product Cart" />
-    <div style={nbody}>{data.intro || "Show products, let customer build a cart"}</div>
-    <div style={{ padding: "0 13px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
-      {products.length ? products.slice(0, 6).map((p, i) => (<div key={i} style={{ fontSize: 11.5, color: D.text, display: "flex", gap: 6, alignItems: "center", justifyContent: "space-between" }}><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><span style={{ color: a, fontWeight: 700 }}>•</span> {p.name}</span><span style={{ color: D.faint, flexShrink: 0 }}>{p.price ? `Rs ${p.price}` : ""}</span></div>)) : <span style={{ fontSize: 12, color: D.faint }}>No products yet</span>}
-      {products.length > 6 && <span style={{ fontSize: 11, color: D.faint }}>+{products.length - 6} more…</span>}
-    </div>
-    <Handle type="source" position={Position.Bottom} style={hStyle(a)} /></div>);
-}
-
-// ===== APPOINTMENT NODE (WhatsApp Flow — no browser, no Google Calendar) =====
-function AppointmentNode({ data, selected }) {
-  const a = NC.appointment;
-  const qs = (data.questions || []).filter((q) => (q.label || "").trim());
-  return (
-    <div style={nodeBox(a, selected)}>
-      <Handle type="target" position={Position.Top} style={hStyle(a)} />
-      <TopLine a={a} />
-      <Hdr a={a} icon="📅" title="Book Appointment" />
-      <div style={nbody}>
-        <div style={{ marginBottom: 8 }}>{data.text || "Appointment book karein"}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, background: D.input, border: `1px solid ${D.border}`, marginBottom: qs.length ? 8 : 0 }}>
-          <span style={{ fontSize: 11 }}>📲</span>
-          <span style={{ fontSize: 11, color: a, fontWeight: 600 }}>{data.buttonText || "Book Appointment"}</span>
-          <span style={{ fontSize: 9.5, color: D.faint, marginLeft: "auto" }}>WhatsApp Flow</span>
-        </div>
-        {qs.length > 0 && <div style={{ fontSize: 10.5, color: D.faint }}>{qs.length} question{qs.length > 1 ? "s" : ""} collected · synced to Google Sheet</div>}
-      </div>
-      <Handle type="source" position={Position.Bottom} style={hStyle(a)} />
-    </div>
-  );
-}
-
-// ===== APPOINTMENT SETTINGS (account-level: slots + Google Sheet, no Calendar) =====
-function ApptSettings({ accountId, ac, questions, onQuestionsChange }) {
-  const [cfg, setCfg] = useState(null);
-  const [svcEmail, setSvcEmail] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [showFlowJson, setShowFlowJson] = useState(false);
-  const [flowJson, setFlowJson] = useState("");
-  const [copiedJson, setCopiedJson] = useState(false);
-  const [inboxes, setInboxes] = useState([]);
-  const [flowInboxId, setFlowInboxId] = useState("");
-  const [wabaId, setWabaId] = useState("");
-  const [creatingFlow, setCreatingFlow] = useState(false);
-  const [flowMsg, setFlowMsg] = useState("");
-  const [flowStatus, setFlowStatus] = useState(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const j = await (await fetch(`${API}/api/appointments/settings?account_id=${accountId}`)).json();
-        setCfg(j.settings || {});
-        setWabaId(j.settings?.waba_id || "");
-        setFlowInboxId(j.settings?.flow_inbox_id ? String(j.settings.flow_inbox_id) : "");
-      } catch { setCfg({}); }
-      try {
-        const j2 = await (await fetch(`${API}/api/appointments/service-email`)).json();
-        setSvcEmail(j2.service_email || "");
-      } catch {}
-      try {
-        const j3 = await (await fetch(`${API}/api/inboxes?account_id=${accountId}`)).json();
-        setInboxes(j3.inboxes || []);
-      } catch {}
-      try {
-        const j4 = await (await fetch(`${API}/api/appointments/flow-status?account_id=${accountId}`)).json();
-        if (j4.flow_id) setFlowStatus(j4);
-      } catch {}
-    })();
-  }, [accountId]);
-
-  const set = (k, v) => setCfg((p) => ({ ...p, [k]: v }));
-
-  const save = async () => {
-    setSaving(true); setMsg("");
-    try {
-      const j = await (await fetch(`${API}/api/appointments/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: accountId, ...cfg, questions }) })).json();
-      if (j.ok) { setMsg("✅ Saved!"); setTimeout(() => setMsg(""), 2500); } else setMsg("❌ " + (j.error || "Failed"));
-    } catch { setMsg("❌ Save failed"); }
-    setSaving(false);
-  };
-
-  const checkSheet = async () => {
-    if (!cfg?.sheet_url) { setMsg("❌ Paste a Google Sheet link first."); return; }
-    setChecking(true); setMsg("");
-    try {
-      const j = await (await fetch(`${API}/api/appointments/check-sheet`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheet_url: cfg.sheet_url }) })).json();
-      if (j.ok) { setMsg("✅ Connected! Bookings will be added as new rows."); if (j.service_email) setSvcEmail(j.service_email); }
-      else setMsg("❌ " + (j.error || "Couldn't connect"));
-    } catch { setMsg("❌ Couldn't reach the server."); }
-    setChecking(false);
-  };
-
-  const loadFlowJson = async () => {
-    setShowFlowJson(true);
-    try {
-      const j = await (await fetch(`${API}/api/appointments/flow-json?account_id=${accountId}`)).json();
-      setFlowJson(JSON.stringify(j.flow_json, null, 2));
-    } catch { setFlowJson("Couldn't load — check the server is reachable."); }
-  };
-
-  const createFlow = async () => {
-    if (!flowInboxId) { setFlowMsg("❌ Choose which WhatsApp number this Flow belongs to."); return; }
-    if (!wabaId.trim()) { setFlowMsg("❌ Paste this number's WhatsApp Business Account (WABA) ID first."); return; }
-    setCreatingFlow(true); setFlowMsg("");
-    try {
-      const j = await (await fetch(`${API}/api/appointments/create-flow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: accountId, inbox_id: flowInboxId, waba_id: wabaId.trim() }) })).json();
-      if (j.ok) { setFlowMsg("✅ Flow created & published for this number!"); setFlowStatus({ flow_id: j.flow_id, status: j.status }); }
-      else { setFlowMsg("❌ " + (j.error || "Failed")); if (j.flow_id) setFlowStatus({ flow_id: j.flow_id, status: "ERROR" }); }
-    } catch { setFlowMsg("❌ Couldn't reach the server."); }
-    setCreatingFlow(false);
-  };
-
-  if (!cfg) return <div style={{ color: D.faint, fontSize: 12, padding: "8px 0" }}>Loading appointment settings…</div>;
-  const wdays = (cfg.working_days || "1,2,3,4,5").split(",").map(Number);
-  const dayNames = [{ n: "Sun", v: 0 }, { n: "Mon", v: 1 }, { n: "Tue", v: 2 }, { n: "Wed", v: 3 }, { n: "Thu", v: 4 }, { n: "Fri", v: 5 }, { n: "Sat", v: 6 }];
-
-  return (
-    <div>
-      <div style={{ marginBottom: 14 }}>
-        <Lb>Google Sheet link</Lb>
-        <In value={cfg.sheet_url || ""} onChange={(v) => set("sheet_url", v)} placeholder="https://docs.google.com/spreadsheets/d/..." />
-        {svcEmail && (
-          <div style={{ marginTop: 8, padding: "8px 10px", background: D.panel2, borderRadius: 8 }}>
-            <div style={{ fontSize: 10.5, color: D.faint, marginBottom: 4 }}>Share this Sheet with the service account (Editor access):</div>
-            <div style={{ fontSize: 11, color: ac, fontWeight: 700, wordBreak: "break-all" }}>{svcEmail}</div>
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <button onClick={checkSheet} disabled={checking} style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.text, fontSize: 12, fontWeight: 600, cursor: checking ? "default" : "pointer", fontFamily: T.font }}>{checking ? "Checking…" : "🔗 Test connection"}</button>
-        </div>
-        <Hn>Every completed booking is added as a new row here automatically — name, date, time, and each answer below, as its own column. No Google Calendar needed.</Hn>
-      </div>
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}><Lb>Start Time</Lb><In value={cfg.start_time || "09:00"} onChange={(v) => set("start_time", v)} placeholder="09:00" /></div>
-        <div style={{ flex: 1 }}><Lb>End Time</Lb><In value={cfg.end_time || "17:00"} onChange={(v) => set("end_time", v)} placeholder="17:00" /></div>
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}><Lb>Slot (min)</Lb><In value={String(cfg.slot_duration || 30)} onChange={(v) => set("slot_duration", v)} placeholder="30" /></div>
-        <div style={{ flex: 1 }}><Lb>Buffer (min)</Lb><In value={String(cfg.buffer_time || 0)} onChange={(v) => set("buffer_time", v)} placeholder="0" /></div>
-      </div>
-      <Lb>Working Days</Lb>
-      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 4 }}>
-        {dayNames.map((d) => {
-          const on = wdays.includes(d.v);
-          return (
-            <button key={d.v} onClick={() => { const nx = on ? wdays.filter((x) => x !== d.v) : [...wdays, d.v]; set("working_days", nx.sort().join(",")); }}
-              style={{ padding: "5px 9px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${on ? ac : D.border}`, background: on ? hexA(ac, .18) : D.input, color: on ? ac : D.sub }}>
-              {d.n}
-            </button>
-          );
-        })}
-      </div>
-      <Lb>Advance Booking (days)</Lb>
-      <In value={String(cfg.advance_days || 14)} onChange={(v) => set("advance_days", v)} placeholder="14" />
-      <Hn>Slots free/busy are tracked entirely inside the chatbot's own database — every booking made here blocks that slot instantly, no external calendar to sync.</Hn>
-
-      <div style={{ marginTop: 16 }}>
-        <Lb>Questions to ask the customer</Lb>
-        {(questions || []).map((q, i) => {
-          const setQ = (patch) => onQuestionsChange((questions || []).map((x, j) => (j === i ? { ...x, ...patch } : x)));
-          return (
-            <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
-              <Lb>Question {i + 1}</Lb>
-              <In value={q.label} onChange={(v) => setQ({ label: v })} placeholder="e.g. Apna naam likhein" />
-              <div style={{ height: 6 }} />
-              <div style={{ display: "flex", gap: 6 }}>
-                <div style={{ flex: 1 }}><Lb>Save as</Lb><In value={q.key} onChange={(v) => setQ({ key: v.replace(/\s+/g, "_") })} placeholder="naam" /></div>
-                <div style={{ flex: 1 }}>
-                  <Lb>Type</Lb>
-                  <select className="cs-in" value={q.input_type || "text"} onChange={(e) => setQ({ input_type: e.target.value })} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>
-                    <option value="text">Text</option><option value="number">Number</option><option value="email">Email</option><option value="phone">Phone</option>
-                  </select>
-                </div>
-              </div>
-              {(questions || []).length > 1 && <button onClick={() => onQuestionsChange(questions.filter((_, j) => j !== i))} style={{ marginTop: 8, width: "100%", padding: "6px 0", border: `1px solid ${hexA(NC.stop, .5)}`, color: "#fb7185", background: hexA(NC.stop, .08), borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: T.font }}>✕ Remove question</button>}
-            </div>
-          );
-        })}
-        <button onClick={() => onQuestionsChange([...(questions || []), { label: "", key: "", input_type: "text" }])} style={{ marginTop: 4, padding: "9px 12px", border: `1px dashed ${ac}`, color: ac, background: hexA(ac, .08), borderRadius: 8, cursor: "pointer", width: "100%", fontFamily: T.font, fontSize: 13, fontWeight: 600 }}>+ Add Question</button>
-        <Hn>Add as many as you like — each becomes a field in the WhatsApp Flow and a column in your Google Sheet. If you change these after the Flow is already published, hit "Create / Update Flow" again below to push the change.</Hn>
-      </div>
-
-      {msg && <div style={{ marginTop: 10, fontSize: 12, color: msg.startsWith("✅") ? "#4ade80" : "#F87171" }}>{msg}</div>}
-      <button onClick={save} disabled={saving} style={{ marginTop: 10, width: "100%", padding: "9px", borderRadius: 8, border: "none", background: ac, color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: T.font, cursor: saving ? "default" : "pointer", opacity: saving ? .7 : 1 }}>
-        {saving ? "Saving…" : "💾 Save Appointment Settings"}
-      </button>
-
-      <div style={{ marginTop: 14, padding: "10px 12px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 9 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: D.text, marginBottom: 6 }}>⚙️ WhatsApp Flow for this number</div>
-        <div style={{ fontSize: 11, color: D.sub, lineHeight: 1.5, marginBottom: 10 }}>
-          Every WhatsApp number has its own separate Flow — one client's Flow can't be reused on another's number. Pick the number below and create it here; it uses that number's own WhatsApp credentials automatically.
-        </div>
-
-        <Lb>Which WhatsApp number</Lb>
-        <select className="cs-in" value={flowInboxId} onChange={(e) => setFlowInboxId(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>
-          <option value="">— choose a number —</option>
-          {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
-        </select>
-
-        <div style={{ height: 8 }} />
-        <Lb>WhatsApp Business Account (WABA) ID</Lb>
-        <In value={wabaId} onChange={setWabaId} placeholder="e.g. 1029384756123" />
-        <Hn>Found in Meta Business Suite → WhatsApp Manager → your number's account details. This is a one-time lookup per client.</Hn>
-
-        {flowStatus && (
-          <div style={{ marginTop: 10, padding: "7px 10px", background: D.input, borderRadius: 7, fontSize: 11, color: D.sub }}>
-            Current Flow: <span style={{ color: D.text, fontFamily: "monospace" }}>{flowStatus.flow_id}</span> · status: <span style={{ color: flowStatus.status === "PUBLISHED" ? "#4ade80" : flowStatus.status === "ERROR" ? "#fb7185" : "#fbbf24", fontWeight: 700 }}>{flowStatus.status || "unknown"}</span>
-          </div>
-        )}
-        {flowMsg && <div style={{ marginTop: 8, fontSize: 12, color: flowMsg.startsWith("✅") ? "#4ade80" : "#F87171" }}>{flowMsg}</div>}
-        <button onClick={createFlow} disabled={creatingFlow} style={{ marginTop: 10, width: "100%", padding: "9px", borderRadius: 8, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: T.font, cursor: creatingFlow ? "default" : "pointer", opacity: creatingFlow ? .7 : 1 }}>
-          {creatingFlow ? "Creating…" : flowStatus?.flow_id ? "🚀 Update & Republish Flow" : "🚀 Create & Publish Flow"}
-        </button>
-
-        <button onClick={loadFlowJson} style={{ marginTop: 8, padding: "7px 12px", borderRadius: 7, border: `1px solid ${D.border}`, background: D.input, color: D.text, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font, width: "100%" }}>📄 View raw Flow JSON (advanced / debugging)</button>
-        {showFlowJson && (
-          <div style={{ marginTop: 8 }}>
-            <textarea readOnly value={flowJson} rows={10} style={{ width: "100%", padding: 8, borderRadius: 7, fontSize: 10.5, fontFamily: "monospace", background: "#05070c", color: "#9ec1ff", border: `1px solid ${D.border}`, boxSizing: "border-box", resize: "vertical" }} />
-            <button onClick={() => { if (copyText(flowJson)) { setCopiedJson(true); setTimeout(() => setCopiedJson(false), 1500); } }} style={{ marginTop: 6, padding: "6px 12px", borderRadius: 7, border: `1px solid ${D.border}`, background: copiedJson ? hexA(NC.buttons, .16) : D.panel2, color: copiedJson ? "#4ade80" : D.text, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>{copiedJson ? "✓ Copied" : "⧉ Copy JSON"}</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const nodeTypes = { start: StartNode, text: TextNode, buttons: ButtonsNode, list: ListNode, media: MediaNode, cta: CtaNode, question: QuestionNode, delay: DelayNode, condition: ConditionNode, tag: TagNode, form: FormNode, catalog: CatalogNode, appointment: AppointmentNode, stop: StopNode };
-
-function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }) {
-  const { onDeleteEdge } = useContext(EdgeCtx) || {};
-  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
-  return (<>
-    <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{ ...style, strokeWidth: 1.8 }} />
-    <EdgeLabelRenderer>
-      <button onClick={(e) => { e.stopPropagation(); onDeleteEdge && onDeleteEdge(id); }} title="Remove connection"
-        style={{ position: "absolute", transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all", width: 18, height: 18, borderRadius: "50%", border: `2px solid ${D.bg}`, background: NC.stop, color: "#fff", cursor: "pointer", fontSize: 10, lineHeight: "14px", padding: 0 }}>✕</button>
-    </EdgeLabelRenderer>
-  </>);
-}
-const edgeTypes = { deletable: DeletableEdge };
-
-function defaultData(kind) {
-  if (kind === "text") return { text: "Type your message here…" };
-  if (kind === "buttons") return { header: { type: "none", value: "" }, text: "Please choose an option", buttons: [{ title: "Yes" }, { title: "No" }], footer: "" };
-  if (kind === "list") return { header: { type: "none", value: "" }, body: "Pick one from the list", button: "View options", footer: "", sections: [{ title: "", rows: [{ title: "Option 1", description: "" }, { title: "Option 2", description: "" }] }] };
-  if (kind === "media") return { url: "", mediaType: "", name: "", caption: "" };
-  if (kind === "cta") return { header: { type: "none", value: "" }, body: "Tap the button below", display: "Open link", url: "", footer: "" };
-  if (kind === "question") return { text: "Your question…", saveAs: "answer", responseFormat: "any", timeoutValue: 0, timeoutUnit: "seconds", timeoutMessage: "", continueOnTimeout: false };
-  if (kind === "delay") return { value: 1, unit: "seconds" };
-  if (kind === "condition") return { match: "all", conditions: [{ first: "{{last_message}}", operator: "contains", second: "" }] };
-  if (kind === "tag") return { labels: "" };
-  if (kind === "form") return { intro: "Please fill this quick form:", fields: [{ label: "Apna naam likhein", key: "naam", type: "text" }, { label: "Phone number", key: "phone", type: "text" }], submitMessage: "Shukriya! Hum jald rabta karenge 🙌" };
-  if (kind === "catalog") return { intro: "", products: [{ name: "Pizza", price: "800", desc: "Fresh & cheesy" }, { name: "Burger", price: "400", desc: "Beef patty" }], qtyOptions: "1,2,3,4,5,6,7,8,9,10", addMore: "➕ Add more", checkout: "✅ Confirm", cartLine: "🛒 *Aapka cart:*\n{{cart}}\n\n*Total: Rs {{cartTotal}}*", fields: [{ label: "Apni delivery location batayein 📍", key: "location", type: "text" }, { label: "Phone number?", key: "phone", type: "text" }], submitMessage: "Shukriya! Aapka order mil gaya 🙌 Hum jald rabta karenge." };
-  if (kind === "appointment") return { text: "📅 Appointment book karein — button tap karein!", buttonText: "Book Appointment", footer: "" };
-  if (kind === "stop") return { text: "Connecting you to an agent 🙌" };
-  return {};
-}
-
-const PALETTE = [
-  { group: "Messages", items: [
-    { kind: "text", label: "Send Text", icon: "💬", color: NC.text },
-    { kind: "buttons", label: "Send Buttons", icon: "🔘", color: NC.buttons },
-    { kind: "list", label: "Send List", icon: "📋", color: NC.list },
-    { kind: "media", label: "Send Media", icon: "🖼️", color: NC.media },
-    { kind: "cta", label: "Send CTA", icon: "🔗", color: NC.cta },
-    { kind: "question", label: "Ask Question", icon: "❓", color: NC.question },
-    { kind: "form", label: "Send Form", icon: "📝", color: NC.form },
-    { kind: "catalog", label: "Product Cart", icon: "🛒", color: NC.catalog },
-    { kind: "appointment", label: "Book Appointment", icon: "📅", color: NC.appointment },
-  ]},
-  { group: "Logic", items: [
-    { kind: "delay", label: "Delay", icon: "⏱️", color: NC.delay },
-    { kind: "condition", label: "Condition", icon: "🔀", color: NC.condition },
-    { kind: "tag", label: "Update Tag", icon: "🏷️", color: NC.tag },
-    { kind: "stop", label: "Stop Chatbot", icon: "🛑", color: NC.stop },
-  ]},
-];
-
-const startNode = () => ({ id: "start", type: "start", position: { x: 340, y: 30 }, data: { keywords: "", fuzzy: false, sensitivity: 80 }, deletable: false });
-const hdr = (d) => ({ type: (d.header && d.header.type) || "none", value: (d.header && d.header.value) || "" });
-
-function toEngineFormat(nodes, edges) {
-  const def = { start: null, trigger: { keywords: [], fuzzy: false, sensitivity: 80 }, layout: {}, nodes: {} };
-  const plainNext = {}, btnNext = {}, rowNext = {}, condTrue = {}, condFalse = {};
-  for (const e of edges) {
-    const h = e.sourceHandle;
-    if (h && h.startsWith("btn-")) { (btnNext[e.source] = btnNext[e.source] || {})[h] = e.target; }
-    else if (h && h.startsWith("row-")) { (rowNext[e.source] = rowNext[e.source] || {})[h] = e.target; }
-    else if (h === "cond-true") condTrue[e.source] = e.target;
-    else if (h === "cond-false") condFalse[e.source] = e.target;
-    else (plainNext[e.source] = plainNext[e.source] || []).push(e.target);
+  const creds = await getWaCreds(accountId, inboxId);
+  if (!creds) {
+    res.status(400).json({
+      ok: false,
+      error: "Is inbox ka WhatsApp token nahi mila. Chatwoot mein inbox settings check karein.",
+    });
+    return null;
   }
-  const nx = (id) => { const arr = plainNext[id]; if (!arr || !arr.length) return null; return arr.length === 1 ? arr[0] : arr; };
-  def.start = (plainNext["start"] || [])[0] || null;
-  for (const n of nodes) def.layout[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
-  for (const n of nodes) {
-    const d = n.data || {};
-    if (n.type === "start") { def.trigger = { keywords: (d.keywords || "").split(",").map((x) => x.trim()).filter(Boolean), fuzzy: !!d.fuzzy, sensitivity: parseInt(d.sensitivity, 10) || 80 }; continue; }
-    else if (n.type === "text") def.nodes[n.id] = { type: "text", text: d.text || "", next: nx(n.id) };
-    else if (n.type === "media") def.nodes[n.id] = { type: "media", url: d.url || "", media_type: d.mediaType || "", name: d.name || "", caption: d.caption || "", next: nx(n.id) };
-    else if (n.type === "cta") def.nodes[n.id] = { type: "cta", header: hdr(d), body: d.body || "", display: d.display || "", url: d.url || "", footer: d.footer || "", next: nx(n.id) };
-    else if (n.type === "delay") def.nodes[n.id] = { type: "delay", seconds: (d.unit === "minutes" ? (parseInt(d.value, 10) || 0) * 60 : (parseInt(d.value, 10) || 0)), next: nx(n.id) };
-    else if (n.type === "tag") def.nodes[n.id] = { type: "tag", labels: (d.labels || "").split(",").map((x) => x.trim()).filter(Boolean), next: nx(n.id) };
-    else if (n.type === "form") def.nodes[n.id] = { type: "form", intro: d.intro || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => { const base = { label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)), type: fd.type || "text" }; if (fd.type === "list" || fd.type === "buttons") base.options = (fd.options || []).filter((o) => (o.title || "").trim()).map((o) => ({ title: o.title })); if (fd.type === "list") base.list_button = (fd.listButton || "").slice(0, 20); return base; }), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: nx(n.id) };
-    else if (n.type === "catalog") def.nodes[n.id] = { type: "catalog", intro: d.intro || "", products: (d.products || []).filter((p) => (p.name || "").trim()).map((p) => ({ name: p.name || "", price: (String(p.price || "").replace(/[^\d.]/g, "")) || "0", desc: p.desc || "" })), qty_options: (d.qtyOptions || "1,2,3,4,5").split(",").map((x) => x.trim()).filter(Boolean), add_more_label: d.addMore || "➕ Aur add karein", checkout_label: d.checkout || "✅ Order complete karein", cart_line: d.cartLine || "", fields: (d.fields || []).filter((fd) => (fd.label || "").trim()).map((fd, i) => { const base = { label: fd.label || "", key: (fd.key || "").trim() || ("field_" + (i + 1)), type: fd.type || "text" }; if (fd.type === "list" || fd.type === "buttons") base.options = (fd.options || []).filter((o) => (o.title || "").trim()).map((o) => ({ title: o.title })); if (fd.type === "list") base.list_button = (fd.listButton || "").slice(0, 20); return base; }), submit_message: d.submitMessage || "", sheet_url: (d.sheetUrl || "").trim(), next: nx(n.id) };
-    else if (n.type === "appointment") def.nodes[n.id] = { type: "appointment", text: d.text || "", button_text: d.buttonText || "Book Appointment", footer: d.footer || "", next: nx(n.id) };
-    else if (n.type === "stop") def.nodes[n.id] = { type: "handover", text: d.text || "" };
-    else if (n.type === "question") def.nodes[n.id] = { type: "question", text: d.text || "", save_as: d.saveAs || "answer", response_format: d.responseFormat || "any", timeout_seconds: (d.timeoutValue ? (d.timeoutUnit === "minutes" ? parseInt(d.timeoutValue, 10) * 60 : parseInt(d.timeoutValue, 10)) : 0), timeout_message: d.timeoutMessage || "", continue_on_timeout: !!d.continueOnTimeout, next: nx(n.id) };
-    else if (n.type === "condition") def.nodes[n.id] = { type: "condition", match: d.match || "all", conditions: (d.conditions || []).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })), next_true: condTrue[n.id] || null, next_false: condFalse[n.id] || null };
-    else if (n.type === "buttons") def.nodes[n.id] = { type: "buttons", header: hdr(d), text: d.text || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: nx(n.id), buttons: (d.buttons || []).map((b, i) => ({ title: b.title || `Button ${i + 1}`, next: (btnNext[n.id] || {})[`btn-${i}`] || null })) };
-    else if (n.type === "list") {
-      const secs = (d.sections || []).map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title || "", description: r.description || "" })) }));
-      let gi = 0; secs.forEach((sec) => sec.rows.forEach((r) => { r.next = (rowNext[n.id] || {})[`row-${gi}`] || null; gi++; }));
-      def.nodes[n.id] = { type: "list", header: hdr(d), body: d.body || "", button: d.button || "", footer: d.footer || "", loop_menu: !!d.loopMenu, text_menu: !!d.textMenu, next: nx(n.id), sections: secs };
+
+  const wabaId = await getWabaId(accountId, inboxId, creds);
+  if (!wabaId) {
+    res.status(400).json({
+      ok: false,
+      error: "WABA id nahi mili. Inbox ke provider config mein business_account_id set karein.",
+    });
+    return null;
+  }
+
+  return { accountId, inboxId, creds, wabaId };
+}
+
+function metaErr(e) {
+  const d = e.response && e.response.data;
+  const m = d && d.error;
+  if (m) {
+    return {
+      ok: false,
+      error: m.error_user_msg || m.message || "Meta error",
+      code: m.code,
+      subcode: m.error_subcode,
+      details: m.error_data && m.error_data.details,
+    };
+  }
+  return { ok: false, error: e.message || "Unknown error" };
+}
+
+/* ---------- LIST ---------- */
+app.get("/api/templates", async (req, res) => {
+  try {
+    const ctx = await tplContext(req, res);
+    if (!ctx) return;
+
+    const r = await cw.get(
+      `https://graph.facebook.com/${WA_VER}/${ctx.wabaId}/message_templates`,
+      {
+        params: { limit: 250 },
+        headers: { Authorization: `Bearer ${ctx.creds.token}` },
+        timeout: 20000,
+      }
+    );
+
+    const list = (r.data && r.data.data) || [];
+    res.json({
+      ok: true,
+      templates: list.map((t) => ({
+        id: t.id,
+        name: t.name,
+        language: t.language,
+        status: t.status,
+        category: t.category,
+        components: t.components || [],
+        rejected_reason: t.rejected_reason || null,
+        quality_score: t.quality_score || null,
+      })),
+    });
+  } catch (e) {
+    console.error("GET /api/templates", e.response?.data || e.message);
+    res.status(200).json(metaErr(e));
+  }
+});
+
+/* ---------- META ---------- */
+app.get("/api/templates/meta", async (req, res) => {
+  try {
+    const ctx = await tplContext(req, res);
+    if (!ctx) return;
+
+    /* asal phone number Meta se — builder isay `phone` naam se parhta hai */
+    let phone = ctx.creds.phoneId;
+    let verifiedName = null;
+    try {
+      const r = await cw.get(`https://graph.facebook.com/${WA_VER}/${ctx.creds.phoneId}`, {
+        params: { fields: "display_phone_number,verified_name,quality_rating" },
+        headers: { Authorization: `Bearer ${ctx.creds.token}` },
+        timeout: 15000,
+      });
+      phone = (r.data && r.data.display_phone_number) || phone;
+      verifiedName = (r.data && r.data.verified_name) || null;
+    } catch (e) {
+      /* ignore */
     }
+
+    res.json({
+      ok: true,
+      phone,
+      phone_number: phone,
+      phone_number_id: ctx.creds.phoneId,
+      waba_id: ctx.wabaId,
+      verified_name: verifiedName,
+      categories: ["MARKETING", "UTILITY", "AUTHENTICATION"],
+      languages: [
+        { code: "en", name: "English" },
+        { code: "en_US", name: "English (US)" },
+        { code: "en_GB", name: "English (UK)" },
+        { code: "ur", name: "Urdu" },
+        { code: "ar", name: "Arabic" },
+        { code: "hi", name: "Hindi" },
+      ],
+      header_types: ["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT"],
+      button_types: ["QUICK_REPLY", "URL", "PHONE_NUMBER"],
+    });
+  } catch (e) {
+    console.error("GET /api/templates/meta", e.response?.data || e.message);
+    res.status(200).json(metaErr(e));
   }
-  return def;
-}
+});
 
-function fromEngineFormat(def) {
-  const start = startNode();
-  if (def && def.trigger) start.data = { keywords: (def.trigger.keywords || []).join(", "), fuzzy: !!def.trigger.fuzzy, sensitivity: def.trigger.sensitivity || 80 };
-  if (def && def.layout && def.layout.start) start.position = def.layout.start;
-  const nodes = [start]; const edges = []; const y = 200;
-  const pushNext = (srcId, nextVal, handle) => { const arr = Array.isArray(nextVal) ? nextVal : (nextVal ? [nextVal] : []); arr.forEach((t, k) => { if (!t) return; const e = { id: `e-${srcId}-${handle || "n"}${k}`, source: srcId, target: t, type: "deletable", animated: true }; if (handle) e.sourceHandle = handle; edges.push(e); }); };
-  const ids = Object.keys((def && def.nodes) || {});
-  ids.forEach((id, idx) => {
-    const node = def.nodes[id]; const kind = node.type === "handover" ? "stop" : node.type; const data = {};
-    if (kind === "text") data.text = node.text || "";
-    if (kind === "stop") data.text = node.text || "";
-    if (kind === "media") { data.url = node.url || ""; data.mediaType = node.media_type || ""; data.name = node.name || ""; data.caption = node.caption || ""; }
-    if (kind === "cta") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.display = node.display || ""; data.url = node.url || ""; data.footer = node.footer || ""; }
-    if (kind === "delay") { const s = node.seconds || 0; if (s && s % 60 === 0 && s >= 60) { data.value = s / 60; data.unit = "minutes"; } else { data.value = s; data.unit = "seconds"; } }
-    if (kind === "question") { data.text = node.text || ""; data.saveAs = node.save_as || "answer"; data.responseFormat = node.response_format || "any"; const ts = node.timeout_seconds || 0; if (ts && ts % 60 === 0 && ts >= 60) { data.timeoutValue = ts / 60; data.timeoutUnit = "minutes"; } else { data.timeoutValue = ts; data.timeoutUnit = "seconds"; } data.timeoutMessage = node.timeout_message || ""; data.continueOnTimeout = !!node.continue_on_timeout; }
-    if (kind === "condition") { data.match = node.match || "all"; data.conditions = (Array.isArray(node.conditions) && node.conditions.length ? node.conditions : [{ first: node.first || "{{last_message}}", operator: node.operator || "contains", second: node.second || "" }]).map((c) => ({ first: c.first || "", operator: c.operator || "equals", second: c.second || "" })); }
-    if (kind === "tag") data.labels = (node.labels || []).join(", ");
-    if (kind === "form") { data.intro = node.intro || ""; data.fields = (node.fields && node.fields.length ? node.fields : [{ label: "", key: "", type: "text" }]).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })), listButton: fd.list_button || "" })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
-    if (kind === "catalog") { data.intro = node.intro || ""; data.products = (node.products && node.products.length ? node.products : [{ name: "", price: "", desc: "" }]).map((p) => ({ name: p.name || "", price: p.price || "", desc: p.desc || "" })); data.qtyOptions = (node.qty_options && node.qty_options.length ? node.qty_options.join(",") : "1,2,3,4,5,6,7,8,9,10"); data.addMore = node.add_more_label || "➕ Add more"; data.checkout = node.checkout_label || "✅ Confirm"; data.cartLine = node.cart_line || ""; data.fields = (node.fields || []).map((fd) => ({ label: fd.label || "", key: fd.key || "", type: fd.type || "text", options: (fd.options || []).map((o) => ({ title: o.title || "" })), listButton: fd.list_button || "" })); data.submitMessage = node.submit_message || ""; data.sheetUrl = node.sheet_url || ""; }
-    if (kind === "appointment") { data.text = node.text || ""; data.buttonText = node.button_text || "Book Appointment"; data.footer = node.footer || ""; }
-    if (kind === "buttons") { data.header = node.header || { type: "none", value: "" }; data.text = node.text || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; data.buttons = (node.buttons || []).map((b) => ({ title: b.title })); }
-    let normSecs = null;
-    if (kind === "list") { data.header = node.header || { type: "none", value: "" }; data.body = node.body || ""; data.button = node.button || ""; data.footer = node.footer || ""; data.loopMenu = !!node.loop_menu; data.textMenu = !!node.text_menu; normSecs = (node.sections && node.sections.length ? node.sections : [{ title: "", rows: node.rows || [] }]); data.sections = normSecs.map((sec) => ({ title: sec.title || "", rows: (sec.rows || []).map((r) => ({ title: r.title, description: r.description || "" })) })); }
-    nodes.push({ id, type: kind, position: (def.layout && def.layout[id]) ? def.layout[id] : { x: 340 + (idx % 2) * 330, y: y + idx * 135 }, data });
-    if (kind === "buttons") { (node.buttons || []).forEach((b, i) => { if (b.next) edges.push({ id: `e-${id}-b${i}`, source: id, sourceHandle: `btn-${i}`, target: b.next, type: "deletable", animated: true }); }); pushNext(id, node.next, "default"); }
-    else if (kind === "list") { let gi = 0; (normSecs || []).forEach((sec) => (sec.rows || []).forEach((r) => { if (r.next) edges.push({ id: `e-${id}-r${gi}`, source: id, sourceHandle: `row-${gi}`, target: r.next, type: "deletable", animated: true }); gi++; })); pushNext(id, node.next, "default"); }
-    else if (kind === "condition") { if (node.next_true) edges.push({ id: `e-${id}-t`, source: id, sourceHandle: "cond-true", target: node.next_true, type: "deletable", animated: true }); if (node.next_false) edges.push({ id: `e-${id}-f`, source: id, sourceHandle: "cond-false", target: node.next_false, type: "deletable", animated: true }); }
-    else pushNext(id, node.next);
-  });
-  if (def && def.start) edges.push({ id: "e-start", source: "start", target: def.start, type: "deletable", animated: true });
-  return { nodes, edges };
-}
+/* ---------- MEDIA UPLOAD (header ke sample ke liye) ----------
+   Meta ka resumable upload. App id har client ka apna — uske token se. */
+app.post("/api/templates/upload-media", tplUpload.single("file"), async (req, res) => {
+  try {
+    const ctx = await tplContext(req, res);
+    if (!ctx) return;
 
-export default function App() {
-  const qv = params.get("view");
-  const initialView = qv === "gallery" ? "gallery" : qv === "templates" ? "templates" : "dashboard";
-  const [view, setView] = useState(initialView);
-  const [editId, setEditId] = useState(null);
-  useEffect(() => { injectFont(); injectStyles(); }, []);
-  if (view === "gallery") return <Gallery />;
-  if (view === "templates") return <Templates />;
-  if (view === "editor") return <Editor flowId={editId} onBack={() => setView("dashboard")} />;
-  return <Dashboard onEdit={(id) => { setEditId(id); setView("editor"); }} />;
-}
+    if (!req.file) return res.json({ ok: false, error: "file chahiye" });
 
-function Dashboard({ onEdit }) {
-  const [flows, setFlows] = useState(null);
-  const [inboxes, setInboxes] = useState([]);
-  const [menuOpen, setMenuOpen] = useState(null);
-  const [confirmDel, setConfirmDel] = useState(null);
-  const [pendingInbox, setPendingInbox] = useState({});
-  const [msg, setMsg] = useState("");
-  const isMobile = useIsMobile();
-  const fileRef = useRef(null);
-
-  const load = async () => {
-    try { const j = await (await fetch(`${API}/api/flows?account_id=${ACCOUNT_ID}`)).json(); setFlows(j.flows || []); } catch { setFlows([]); }
-    try { const j = await (await fetch(`${API}/api/inboxes?account_id=${ACCOUNT_ID}`)).json(); setInboxes(j.inboxes || []); } catch { setInboxes([]); }
-  };
-  useEffect(() => { load(); }, []);
-
-  const createBot = async () => { try { const j = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: "New chatbot" }) })).json(); if (j.ok) onEdit(j.flow.id); } catch { setMsg("Create failed"); } };
-  const duplicate = async (f) => { setMenuOpen(null); try { const full = await (await fetch(`${API}/api/flows/${f.id}`)).json(); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: (f.name || "Chatbot") + " (copy)" }) })).json(); if (cr.ok) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: full.flow.definition }) }); await load(); } catch { setMsg("Duplicate failed"); } };
-  const exportBot = async (f) => { setMenuOpen(null); try { const full = await (await fetch(`${API}/api/flows/${f.id}`)).json(); const blob = new Blob([JSON.stringify({ name: full.flow.name, definition: full.flow.definition }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${(f.name || "chatbot").replace(/\s+/g, "-")}.json`; a.click(); URL.revokeObjectURL(url); } catch { setMsg("Export failed"); } };
-  const doDelete = async () => { const f = confirmDel; setConfirmDel(null); if (!f) return; try { await fetch(`${API}/api/flows/${f.id}`, { method: "DELETE" }); await load(); } catch { setMsg("Delete failed"); } };
-  const importBot = async (e) => { const file = e.target.files?.[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const cr = await (await fetch(`${API}/api/flows`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: ACCOUNT_ID, name: data.name || "Imported chatbot" }) })).json(); if (cr.ok && data.definition) await fetch(`${API}/api/flows/${cr.flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: cr.flow.name, definition: data.definition }) }); await load(); } catch { setMsg("Import failed — invalid JSON"); } e.target.value = ""; };
-  const saveInbox = async (f) => { const val = pendingInbox[f.id]; try { await fetch(`${API}/api/flows/${f.id}/assign-inbox`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inbox_id: val === "" ? null : val }) }); setPendingInbox((p) => { const n = { ...p }; delete n[f.id]; return n; }); await load(); } catch { setMsg("Save failed"); } };
-
-  const btnPrimary = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: T.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: T.font };
-  const btnGhost = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: T.soft, color: T.text, border: `1px solid ${T.border}`, borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 500, fontFamily: T.font };
-  const pill = (s) => ({ padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: s === "published" ? T.greenBg : T.grayPillBg, color: s === "published" ? T.green : T.grayPill });
-
-  return (
-    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.font, color: T.text }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: isMobile ? "18px 16px 12px" : "24px 28px 12px", gap: 12, flexWrap: "wrap" }}>
-        <div><div style={{ fontSize: isMobile ? 19 : 22, fontWeight: 700 }}>Chatbots</div><div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Manage your chatbots</div></div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <input ref={fileRef} type="file" accept="application/json" onChange={importBot} style={{ display: "none" }} />
-          <button style={btnGhost} onClick={() => fileRef.current?.click()}>⬆ Import</button>
-          <button style={btnPrimary} onClick={createBot}>＋ {isMobile ? "Create" : "Create Chatbot"}</button>
-        </div>
-      </div>
-      {msg && <div style={{ margin: "0 28px 8px", color: "#F87171", fontSize: 13 }}>{msg}</div>}
-      <div style={{ padding: isMobile ? "8px 16px 28px" : "8px 28px 28px" }}>
-        {isMobile ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {flows === null && <div style={{ color: T.sub, fontSize: 13 }}>Loading…</div>}
-            {flows && flows.length === 0 && <div style={{ color: T.sub, fontSize: 13, padding: 8 }}>No chatbots yet. Tap "Create" to start.</div>}
-            {flows && flows.map((f) => {
-              const cur = f.inbox_id ?? ""; const sel = pendingInbox[f.id] !== undefined ? pendingInbox[f.id] : cur;
-              const dirty = pendingInbox[f.id] !== undefined && String(pendingInbox[f.id]) !== String(cur);
-              return (
-                <div key={f.id} style={{ background: T.soft, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
-                    <span style={pill(f.status)}>{f.status}</span>
-                  </div>
-                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ width: "100%", padding: "9px 10px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: T.font, color: T.text, background: D.input, colorScheme: "var(--cs-scheme)", boxSizing: "border-box", marginBottom: 10 }}>
-                    <option value="">— None (off)</option>
-                    {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
-                  </select>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {dirty && <button onClick={() => saveInbox(f)} style={{ padding: "8px 12px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Save</button>}
-                    <button style={{ ...btnPrimary, flex: 1, justifyContent: "center" }} onClick={() => onEdit(f.id)}>Edit</button>
-                    <button onClick={() => duplicate(f)} style={btnGhost}>Copy</button>
-                    <button onClick={() => setConfirmDel(f)} style={{ ...btnGhost, color: "#F87171" }}>Delete</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 12 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.6fr 1.1fr", padding: "12px 16px", background: T.soft, fontSize: 12, fontWeight: 600, color: T.sub, textTransform: "uppercase", letterSpacing: ".03em", borderRadius: "12px 12px 0 0" }}>
-            <div>Name</div><div>Status</div><div>Number / Inbox</div><div style={{ textAlign: "right" }}>Actions</div>
-          </div>
-          {flows === null && <div style={{ padding: 20, color: T.sub, fontSize: 13 }}>Loading…</div>}
-          {flows && flows.length === 0 && <div style={{ padding: 24, color: T.sub, fontSize: 13 }}>No chatbots yet. Click "Create Chatbot" to get started.</div>}
-          {flows && flows.map((f) => {
-            const cur = f.inbox_id ?? ""; const sel = pendingInbox[f.id] !== undefined ? pendingInbox[f.id] : cur;
-            const dirty = pendingInbox[f.id] !== undefined && String(pendingInbox[f.id]) !== String(cur);
-            return (
-              <div key={f.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.6fr 1.1fr", alignItems: "center", padding: "14px 16px", borderTop: `1px solid ${T.border}` }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{f.name}</div>
-                <div><span style={pill(f.status)}>{f.status}</span></div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <select value={sel} onChange={(e) => setPendingInbox((p) => ({ ...p, [f.id]: e.target.value }))} style={{ padding: "6px 8px", border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: D.input, colorScheme: "var(--cs-scheme)", maxWidth: 170 }}>
-                    <option value="">— None (off)</option>
-                    {inboxes.map((i) => (<option key={i.id} value={i.id}>{i.name}</option>))}
-                  </select>
-                  {dirty && <button onClick={() => saveInbox(f)} style={{ padding: "6px 12px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Save</button>}
-                </div>
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                  <button style={{ ...btnGhost, padding: "6px 14px" }} onClick={() => onEdit(f.id)}>Edit</button>
-                  <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenuOpen(menuOpen && menuOpen.id === f.id ? null : { id: f.id, x: r.right, y: r.bottom }); }} style={{ width: 32, height: 32, border: `1px solid ${T.border}`, borderRadius: 8, background: T.soft, cursor: "pointer", fontSize: 18, lineHeight: "16px", color: T.sub }}>⋮</button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        )}
-      </div>
-
-      {menuOpen && (() => {
-        const f = (flows || []).find((x) => x.id === menuOpen.id); if (!f) return null;
-        const items = [["Edit", () => { setMenuOpen(null); onEdit(f.id); }], ["Duplicate", () => duplicate(f)], ["Export", () => exportBot(f)], ["Delete", () => { setMenuOpen(null); setConfirmDel(f); }]];
-        return (<>
-          <div onClick={() => setMenuOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
-          <div style={{ position: "fixed", top: menuOpen.y + 6, left: menuOpen.x - 160, width: 160, background: "#161C28", border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,.5)", zIndex: 100, overflow: "hidden" }}>
-            {items.map(([lbl, fn]) => (<div key={lbl} onClick={fn} style={{ padding: "10px 14px", fontSize: 13, cursor: "pointer", color: lbl === "Delete" ? "#F87171" : T.text, borderTop: lbl === "Delete" ? `1px solid ${T.border}` : "none" }} onMouseEnter={(e) => (e.currentTarget.style.background = T.soft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>{lbl}</div>))}
-          </div>
-        </>);
-      })()}
-
-      {confirmDel && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={() => setConfirmDel(null)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#161C28", borderRadius: 12, padding: 24, width: 360, maxWidth: "100%", fontFamily: T.font, color: T.text, border: `1px solid ${T.border}` }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Delete chatbot?</div>
-            <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>"{confirmDel.name}" will be permanently deleted.</div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button style={btnGhost} onClick={() => setConfirmDel(null)}>Cancel</button>
-              <button style={{ ...btnPrimary, background: "#dc2626" }} onClick={doDelete}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Gallery() {
-  const [media, setMedia] = useState(null);
-  const [msg, setMsg] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [confirmDel, setConfirmDel] = useState(null);
-  const [copiedId, setCopiedId] = useState(null);
-  const [filter, setFilter] = useState("all");
-  const [preview, setPreview] = useState(null);
-  const fileRef = useRef(null);
-
-  const load = async () => { try { const j = await (await fetch(`${API}/api/media?account_id=${ACCOUNT_ID}`)).json(); setMedia(j.media || []); } catch { setMedia([]); setMsg("Couldn't load media — is the bot engine running?"); } };
-  useEffect(() => { load(); }, []);
-
-  const onFiles = async (e) => {
-    const files = Array.from(e.target.files || []); e.target.value = ""; if (!files.length) return;
-    setUploading(true); setMsg(""); let fail = 0;
-    for (const file of files) { try { const fd = new FormData(); fd.append("file", file); fd.append("account_id", String(ACCOUNT_ID)); const j = await (await fetch(`${API}/api/upload`, { method: "POST", body: fd })).json(); if (!j.ok) fail++; } catch { fail++; } }
-    setUploading(false); if (fail) setMsg(`${fail} file(s) failed to upload.`); await load();
-  };
-  const doDelete = async () => { const m = confirmDel; setConfirmDel(null); if (!m) return; try { await fetch(`${API}/api/media/${m.id}`, { method: "DELETE" }); await load(); } catch { setMsg("Delete failed."); } };
-  const doCopy = (m) => { if (copyText(m.url)) { setCopiedId(m.id); setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1500); } else setMsg("Copy failed — please copy the link manually."); };
-
-  const list = (media || []).filter((m) => filter === "all" || m.type === filter);
-  const counts = (media || []).reduce((acc, m) => { acc[m.type] = (acc[m.type] || 0) + 1; return acc; }, {});
-  const filters = [["all", "All"], ["image", "Images"], ["video", "Videos"], ["audio", "Audio"], ["document", "Docs"]];
-  const primary = { display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 16px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, cursor: uploading ? "default" : "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, opacity: uploading ? .75 : 1 };
-
-  return (
-    <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 10, background: D.panel, borderBottom: `1px solid ${D.border}`, padding: "16px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: D.text }}>Media Gallery</div>
-          <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>Images, videos, audio &amp; documents to use in your chatbots</div>
-        </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-          <input ref={fileRef} type="file" multiple accept="image/*,video/*,audio/*,application/pdf" onChange={onFiles} style={{ display: "none" }} />
-          <button className="cs-pub" style={primary} onClick={() => !uploading && fileRef.current?.click()}>{uploading ? "Uploading…" : "⬆ Upload media"}</button>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 8, padding: "16px 24px 0", flexWrap: "wrap" }}>
-        {filters.map(([key, lbl]) => { const active = filter === key; const n = key === "all" ? (media || []).length : (counts[key] || 0); return (<button key={key} onClick={() => setFilter(key)} style={{ padding: "6px 13px", borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${active ? ACCENT : D.border}`, background: active ? hexA(ACCENT, .16) : D.panel2, color: active ? "#93c5fd" : D.sub }}>{lbl}{media ? ` · ${n}` : ""}</button>); })}
-      </div>
-      {msg && <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: hexA(NC.stop, .12), border: `1px solid ${hexA(NC.stop, .4)}`, color: "#fda4af", borderRadius: 8, fontSize: 13 }}>{msg}</div>}
-      <div style={{ padding: 24 }}>
-        {media === null && <div style={{ color: D.sub, fontSize: 14, padding: 20 }}>Loading…</div>}
-        {media && list.length === 0 && (
-          <div style={{ border: `1px dashed ${D.border}`, borderRadius: 14, padding: "48px 24px", textAlign: "center", color: D.sub, background: D.panel2 }}>
-            <div style={{ fontSize: 34, marginBottom: 10 }}>🖼️</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: D.text, marginBottom: 4 }}>{filter === "all" ? "No media yet" : "No files of this type"}</div>
-            <div style={{ fontSize: 13 }}>Click "Upload media" above to add files.</div>
-          </div>
-        )}
-        {media && list.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 16 }}>
-            {list.map((m) => {
-              const meta = GTYPE[m.type] || GTYPE.document; const name = m.original_name || m.filename || "file";
-              return (
-                <div key={m.id} className="cs-gcard" style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 14, overflow: "hidden", transition: "transform .15s, border-color .15s" }}>
-                  <div style={{ position: "relative", height: 150, background: D.input, display: "grid", placeItems: "center", overflow: "hidden" }}>
-                    {m.type === "image" ? (<img src={m.url} alt={name} onClick={() => setPreview(m)} style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in" }} />)
-                      : m.type === "video" ? (<video src={m.url} preload="metadata" muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />)
-                      : (<div style={{ fontSize: 44 }}>{meta.icon}</div>)}
-                    <span style={{ position: "absolute", top: 8, left: 8, padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: hexA(meta.color, .22), color: meta.color, border: `1px solid ${hexA(meta.color, .5)}` }}>{meta.label}</span>
-                  </div>
-                  <div style={{ padding: "10px 12px 12px" }}>
-                    <div title={name} style={{ fontSize: 13, fontWeight: 600, color: D.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
-                    <div style={{ fontSize: 11, color: D.faint, marginTop: 2 }}>{fmtSize(m.size)}</div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                      <button onClick={() => doCopy(m)} style={{ flex: 1, padding: "7px 8px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, border: `1px solid ${D.border}`, background: copiedId === m.id ? hexA(NC.buttons, .18) : D.panel2, color: copiedId === m.id ? "#4ade80" : D.text }}>{copiedId === m.id ? "✓ Copied" : "🔗 Copy link"}</button>
-                      <button onClick={() => setConfirmDel(m)} title="Delete" style={{ width: 36, padding: "7px 0", borderRadius: 7, cursor: "pointer", fontSize: 13, border: `1px solid ${hexA(NC.stop, .5)}`, background: hexA(NC.stop, .08), color: "#fb7185" }}>🗑</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-      {confirmDel && (
-        <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, padding: 22, width: 360, maxWidth: "100%", fontFamily: T.font }}>
-            <div style={{ fontWeight: 700, fontSize: 16, color: D.text, marginBottom: 8 }}>Delete media?</div>
-            <div style={{ fontSize: 13, color: D.sub, marginBottom: 18 }}>"{confirmDel.original_name || confirmDel.filename || "file"}" will be permanently deleted.</div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmDel(null)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: `1px solid ${D.border}`, background: D.panel2, color: D.text }}>Cancel</button>
-              <button onClick={doDelete} style={{ padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: T.font, border: "none", background: "#dc2626", color: "#fff" }}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-      {preview && (
-        <div onClick={() => setPreview(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 210, padding: 24, cursor: "zoom-out" }}>
-          <img src={preview.url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10 }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MediaPicker({ onPick, onClose }) {
-  const [media, setMedia] = useState(null);
-  const [filter, setFilter] = useState("all");
-  useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/media?account_id=${ACCOUNT_ID}`)).json(); setMedia(j.media || []); } catch { setMedia([]); } })(); }, []);
-  const list = (media || []).filter((m) => filter === "all" || m.type === filter);
-  const filters = [["all", "All"], ["image", "Images"], ["video", "Videos"], ["audio", "Audio"], ["document", "Docs"]];
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 760, maxWidth: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", background: D.panel, border: `1px solid ${D.border}`, borderRadius: 14, fontFamily: T.font, overflow: "hidden" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: `1px solid ${D.border}` }}>
-          <div style={{ fontWeight: 700, fontSize: 15, color: D.text }}>Choose media</div>
-          <button onClick={onClose} style={{ marginLeft: "auto", border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13, fontFamily: T.font }}>✕ Close</button>
-        </div>
-        <div style={{ display: "flex", gap: 8, padding: "12px 18px 0", flexWrap: "wrap" }}>
-          {filters.map(([k, l]) => { const act = filter === k; return <button key={k} onClick={() => setFilter(k)} style={{ padding: "5px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${act ? ACCENT : D.border}`, background: act ? hexA(ACCENT, .18) : D.panel2, color: act ? "#93c5fd" : D.sub }}>{l}</button>; })}
-        </div>
-        <div style={{ padding: 18, overflowY: "auto" }}>
-          {media === null && <div style={{ color: D.sub, fontSize: 14 }}>Loading…</div>}
-          {media && list.length === 0 && <div style={{ color: D.sub, fontSize: 14, padding: "20px 0", textAlign: "center" }}>No media yet. Upload some in the Gallery first.</div>}
-          {media && list.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 }}>
-              {list.map((m) => { const meta = GTYPE[m.type] || GTYPE.document; const name = m.original_name || m.filename || "file"; return (
-                <div key={m.id} onClick={() => onPick(m)} className="cs-gcard" style={{ cursor: "pointer", background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, overflow: "hidden", transition: "transform .15s, border-color .15s" }}>
-                  <div style={{ position: "relative", height: 104, background: D.input, display: "grid", placeItems: "center", overflow: "hidden" }}>
-                    {m.type === "image" ? <img src={m.url} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : m.type === "video" ? <video src={m.url} preload="metadata" muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ fontSize: 36 }}>{meta.icon}</div>}
-                    <span style={{ position: "absolute", top: 6, left: 6, padding: "1px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: hexA(meta.color, .22), color: meta.color, border: `1px solid ${hexA(meta.color, .5)}` }}>{meta.label}</span>
-                  </div>
-                  <div style={{ padding: "7px 9px" }}>
-                    <div title={name} style={{ fontSize: 12, fontWeight: 600, color: D.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
-                    <div style={{ fontSize: 10.5, color: D.faint, marginTop: 1 }}>{fmtSize(m.size)}</div>
-                  </div>
-                </div>
-              ); })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Editor({ flowId, onBack }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState([startNode()]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const reopenGuard = useRef(false);
-  const lastTapRef = useRef({ id: null, t: 0 });
-  const [status, setStatus] = useState("Loading…");
-  const [name, setName] = useState("");
-  const [flowStatus, setFlowStatus] = useState("draft");
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerFor, setPickerFor] = useState("media");
-  const [allLabels, setAllLabels] = useState([]);
-  const [tagOpen, setTagOpen] = useState(false);
-  const [tagSearch, setTagSearch] = useState("");
-  const [search, setSearch] = useState("");
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [apptQuestions, setApptQuestions] = useState([{ label: "Apna naam batayein", key: "naam", input_type: "text" }]);
-  const isMobile = useIsMobile();
-  const idRef = useRef(1);
-  const rfRef = useRef(null);
-  const wrapperRef = useRef(null);
-
-  useEffect(() => {
-    (async () => {
-      try { const j = await (await fetch(`${API}/api/flows/${flowId}`)).json(); setName(j.flow.name || ""); setFlowStatus(j.flow.status); const { nodes: n, edges: e } = fromEngineFormat(j.flow.definition || { start: null, nodes: {} }); setNodes(n); setEdges(e); idRef.current = n.reduce((m, x) => Math.max(m, parseInt(String(x.id).replace(/\D/g, ""), 10) || 0), 1); setStatus("Loaded"); } catch { setStatus("Load failed"); }
-    })();
-  }, [flowId]);
-  useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/labels?account_id=${ACCOUNT_ID}`)).json(); setAllLabels(j.labels || []); } catch { setAllLabels([]); } })(); }, []);
-  useEffect(() => { (async () => { try { const j = await (await fetch(`${API}/api/appointments/settings?account_id=${ACCOUNT_ID}`)).json(); const qs = j.settings?.questions; if (qs && qs.length) setApptQuestions(typeof qs === "string" ? JSON.parse(qs) : qs); } catch {} })(); }, []);
-
-  const onConnect = useCallback((p) => setEdges((eds) => addEdge({ ...p, type: "deletable", animated: true }, eds)), [setEdges]);
-  const onDeleteEdge = useCallback((id) => setEdges((es) => es.filter((e) => e.id !== id)), [setEdges]);
-  const addNode = (kind, pos) => {
-    const id = `n${++idRef.current}`;
-    let position = pos;
-    if (!position) {
-      const k = idRef.current % 6;
-      let base = { x: 440, y: 150 };
-      try { if (rfRef.current && rfRef.current.screenToFlowPosition) base = rfRef.current.screenToFlowPosition({ x: window.innerWidth * 0.52, y: window.innerHeight * 0.40 }); } catch (e) {}
-      position = { x: base.x + k * 46, y: base.y + k * 70 };
+    const appId = await getAppId(ctx.creds.token);
+    if (!appId) {
+      return res.json({
+        ok: false,
+        error: "Meta App id nahi mili — is token ke saath media upload nahi ho sakta.",
+      });
     }
-    setNodes((nds) => [...nds, { id, type: kind, position, data: defaultData(kind) }]);
-    setSelectedId(id);
-    if (isMobile) setPaletteOpen(false);
-  };
-  const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; };
-  const onDrop = (e) => {
-    e.preventDefault();
-    const kind = e.dataTransfer.getData("application/cs-node");
-    if (!kind) return;
-    let position; const inst = rfRef.current;
-    try {
-      if (inst && inst.screenToFlowPosition) position = inst.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      else if (inst && inst.project && wrapperRef.current) { const b = wrapperRef.current.getBoundingClientRect(); position = inst.project({ x: e.clientX - b.left, y: e.clientY - b.top }); }
-    } catch (err) {}
-    addNode(kind, position);
-  };
-  const updateData = (id, patch) => setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
-  const selected = nodes.find((n) => n.id === selectedId) || null;
-  const setHeader = (h) => selected && updateData(selected.id, { header: h });
-  const setSections = (mut) => { if (!selected) return; const secs = JSON.parse(JSON.stringify(selected.data.sections || [])); mut(secs); updateData(selected.id, { sections: secs }); };
-  const setCond = (i, patch) => { if (!selected) return; const arr = (selected.data.conditions || []).map((c, j) => (j === i ? { ...c, ...patch } : c)); updateData(selected.id, { conditions: arr }); };
 
-  async function save(publish) {
-    const definition = toEngineFormat(nodes, edges);
-    if (publish && !definition.start) { setStatus("⚠️ Connect Start to a node first"); return; }
-    setStatus(publish ? "Publishing…" : "Saving…");
-    try {
-      await fetch(`${API}/api/flows/${flowId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, definition }) });
-      if (publish) { const j = await (await fetch(`${API}/api/flows/${flowId}/publish`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); if (j.ok) { setFlowStatus("published"); setStatus("✅ Published (live)"); } else setStatus("Error: " + (j.error || "")); }
-      else setStatus("✅ Saved (draft)");
-    } catch { setStatus("Save failed"); }
+    const buf = req.file.buffer;
+    const mime = req.file.mimetype || "application/octet-stream";
+
+    const start = await cw.post(
+      `https://graph.facebook.com/${WA_VER}/${appId}/uploads`,
+      null,
+      {
+        params: { file_length: buf.length, file_type: mime },
+        headers: { Authorization: `Bearer ${ctx.creds.token}` },
+        timeout: 20000,
+      }
+    );
+    const sessionId = start.data && start.data.id;
+    if (!sessionId) return res.json({ ok: false, error: "Upload session nahi bani" });
+
+    const fin = await cw.post(`https://graph.facebook.com/${WA_VER}/${sessionId}`, buf, {
+      headers: {
+        Authorization: `OAuth ${ctx.creds.token}`,
+        file_offset: "0",
+        "Content-Type": mime,
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 120000,
+    });
+
+    const handle = fin.data && fin.data.h;
+    if (!handle) return res.json({ ok: false, error: "Meta ne handle nahi diya" });
+
+    res.json({ ok: true, handle, name: req.file.originalname });
+  } catch (e) {
+    console.error("POST /api/templates/upload-media", e.response?.data || e.message);
+    res.status(200).json(metaErr(e));
   }
-  async function unpublish() { try { const j = await (await fetch(`${API}/api/flows/${flowId}/unpublish`, { method: "POST" })).json(); if (j.ok) { setFlowStatus("draft"); setStatus("Unpublished"); } } catch { setStatus("Failed"); } }
+});
 
-  const dGhost = { padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: `1px solid ${D.border}`, background: D.panel2, color: D.text };
-  const q = search.trim().toLowerCase();
-  const curTags = selected && selected.type === "tag" ? (selected.data.labels || "").split(",").map((x) => x.trim()).filter(Boolean) : [];
-  const toggleTag = (l) => { const next = curTags.includes(l) ? curTags.filter((x) => x !== l) : [...curTags, l]; updateData(selected.id, { labels: next.join(", ") }); };
+/* ---------- CREATE ---------- */
+app.post("/api/templates", async (req, res) => {
+  try {
+    const ctx = await tplContext(req, res);
+    if (!ctx) return;
 
-  const paletteStyle = isMobile
-    ? { position: "fixed", top: 0, left: 0, bottom: 0, width: 248, maxWidth: "82vw", background: D.panel, borderRight: `1px solid ${D.border}`, padding: 12, overflowY: "auto", zIndex: 120, transform: paletteOpen ? "none" : "translateX(-110%)", transition: "transform .22s ease", boxShadow: paletteOpen ? "0 0 40px rgba(0,0,0,.6)" : "none" }
-    : { width: 222, background: D.panel, borderRight: `1px solid ${D.border}`, padding: 12, overflowY: "auto" };
-  const panelStyle = isMobile
-    ? { position: "fixed", inset: 0, width: "100%", height: "100%", background: D.panel, padding: "max(12px, env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom))", overflowY: "auto", WebkitOverflowScrolling: "touch", zIndex: 130, boxSizing: "border-box" }
-    : { width: 304, background: D.panel, borderLeft: `1px solid ${D.border}`, padding: 16, overflowY: "auto" };
+    const b = req.body || {};
+    const name = String(b.name || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    if (!name) return res.json({ ok: false, error: "name chahiye" });
 
-  return (
-    <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", fontFamily: T.font, background: D.bg }}>
-      <div style={{ minHeight: 56, background: D.panel, borderBottom: `1px solid ${D.border}`, display: "flex", alignItems: "center", padding: "8px 12px", gap: 10, flexWrap: "wrap" }}>
-        <button onClick={onBack} style={dGhost}>←{isMobile ? "" : " Back"}</button>
-        {isMobile && <button onClick={() => setPaletteOpen((v) => !v)} style={{ ...dGhost, fontWeight: 700 }}>＋ Nodes</button>}
-        <input className="cs-in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Chatbot name" style={{ borderRadius: 8, padding: "7px 10px", fontSize: 14, fontWeight: 600, fontFamily: T.font, minWidth: isMobile ? 110 : 200, flex: isMobile ? "1 1 110px" : "none" }} />
-        {!isMobile && <span style={{ fontSize: 12, color: D.sub }}>{status}</span>}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          {flowStatus === "published" && <button onClick={unpublish} style={{ ...dGhost, color: D.sub }}>Unpublish</button>}
-          <button onClick={() => save(false)} style={dGhost}>{isMobile ? "Save" : "Save Draft"}</button>
-          <button className="cs-pub" onClick={() => save(true)} style={{ padding: "7px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: T.font, border: "none", background: "#16A34A", color: "#fff", fontWeight: 700 }}>Publish</button>
-        </div>
-        {isMobile && <div style={{ flexBasis: "100%", fontSize: 11.5, color: D.sub }}>{status}</div>}
-        {isMobile && <div style={{ flexBasis: "100%", fontSize: 11, color: D.faint, marginTop: -2 }}>👆 Drag a node to move it • Double-tap to edit</div>}
-      </div>
+    const category = String(b.category || "UTILITY").toUpperCase();
+    const language = b.language || "en";
 
-      <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-        {isMobile && paletteOpen && <div onClick={() => setPaletteOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 110 }} />}
-        <div style={paletteStyle}>
-          {isMobile && <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}><div style={{ fontSize: 13, fontWeight: 700, color: D.text }}>Add a node</div><button onClick={() => setPaletteOpen(false)} style={{ marginLeft: "auto", width: 28, height: 28, borderRadius: 7, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer" }}>✕</button></div>}
-          <input className="cs-in" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search components…" style={{ width: "100%", padding: "8px 10px", borderRadius: 8, fontSize: 12.5, boxSizing: "border-box", fontFamily: T.font, marginBottom: 12 }} />
-          {PALETTE.map((grp) => {
-            const items = grp.items.filter((it) => !q || it.label.toLowerCase().includes(q));
-            if (!items.length) return null;
-            return (
-              <div key={grp.group} style={{ marginBottom: 6 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: D.faint, margin: "6px 2px 8px", textTransform: "uppercase", letterSpacing: ".08em" }}>{grp.group}</div>
-                {items.map((p) => (
-                  <button key={p.kind} className="cs-pal" draggable onDragStart={(e) => { e.dataTransfer.setData("application/cs-node", p.kind); e.dataTransfer.effectAllowed = "move"; }} onClick={() => addNode(p.kind)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", marginBottom: 7, padding: "10px 11px", border: `1px solid ${D.border}`, borderRadius: 9, background: D.panel2, color: D.text, cursor: "pointer", fontSize: 12.5, fontWeight: 500, fontFamily: T.font, transition: "all .12s" }}>
-                    <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: hexA(p.color, .14), color: p.color, fontSize: 12 }}>{p.icon}</span>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-          <div style={{ fontSize: 11, color: D.faint, marginTop: 10, lineHeight: 1.6 }}>{isMobile ? "Tap a node to add it to the canvas, then connect the dots. Tap the ✕ on a line to remove a connection." : <>Drag a node onto the canvas (or click to add), then connect the dots. Click the <b style={{ color: "#fb7185" }}>✕</b> on a line to remove a connection.</>}</div>
-        </div>
+    let components = Array.isArray(b.components) ? b.components : null;
 
-        <div ref={wrapperRef} onDragOver={onDragOver} onDrop={onDrop} style={{ flex: 1, background: D.bg, minWidth: 0 }}>
-          <EdgeCtx.Provider value={{ onDeleteEdge }}>
-            <ReactFlow nodes={nodes} edges={edges} onInit={(inst) => { rfRef.current = inst; }} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: "deletable", animated: true }} onNodeClick={(_, n) => { if (reopenGuard.current) return; if (isMobile) { const now = Date.now(); const prev = lastTapRef.current; const isDouble = prev.id === n.id && now - prev.t < 500; lastTapRef.current = { id: n.id, t: now }; if (isDouble || selectedId === n.id) { setSelectedId(n.id); setTagOpen(false); } return; } setSelectedId(n.id); setTagOpen(false); }} onSelectionChange={({ nodes: sel }) => { if (reopenGuard.current) return; if (isMobile) return; if (sel && sel.length === 1) { setSelectedId(sel[0].id); setTagOpen(false); } }} onPaneClick={() => { setSelectedId(null); setTagOpen(false); lastTapRef.current = { id: null, t: 0 }; }} fitView>
-              <Background color="#1a2230" gap={20} size={1} />
-              {!isMobile && <Controls />}
-              {!isMobile && <MiniMap pannable zoomable nodeColor={(n) => NC[n.type] || ACCENT} maskColor="rgba(7,10,16,.7)" />}
-            </ReactFlow>
-          </EdgeCtx.Provider>
-        </div>
+    if (!components) {
+      components = [];
 
-        {selected && (
-          <div style={panelStyle}>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 14, ...(isMobile ? { position: "sticky", top: 0, background: D.panel, paddingBottom: 10, marginTop: -4, paddingTop: 4, zIndex: 5, borderBottom: `1px solid ${D.border}` } : {}) }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: D.faint, textTransform: "uppercase", letterSpacing: ".06em" }}>Edit node</div>
-              <button onClick={() => { reopenGuard.current = true; setSelectedId(null); setNodes((nds) => nds.map((n) => ({ ...n, selected: false }))); setTimeout(() => { reopenGuard.current = false; }, 300); }} title="Close" style={{ marginLeft: "auto", width: isMobile ? 38 : 30, height: isMobile ? 38 : 30, borderRadius: 8, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: isMobile ? 17 : 14, flexShrink: 0, display: "grid", placeItems: "center" }}>✕</button>
-            </div>
+      /* ---- AUTHENTICATION: Meta khud sab banata hai ---- */
+      if (category === "AUTHENTICATION") {
+        const bodyComp = { type: "BODY" };
+        if (b.add_security_recommendation) bodyComp.add_security_recommendation = true;
+        components.push(bodyComp);
 
-            {selected.type === "start" && (<Ed title="⚡ On Message (Start)"><Lb>Keywords (optional)</Lb><KeywordChips value={selected.data.keywords || ""} onChange={(v) => updateData(selected.id, { keywords: v })} /><Tog on={!!selected.data.fuzzy} onClick={() => updateData(selected.id, { fuzzy: !selected.data.fuzzy })} label="Enable fuzzy matching" />{selected.data.fuzzy && (<><Lb>Match sensitivity: {selected.data.sensitivity ?? 80}%</Lb><Slider value={selected.data.sensitivity ?? 80} onChange={(v) => updateData(selected.id, { sensitivity: v })} /><div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: D.faint, marginTop: 2 }}><span>Exact</span><span>Very loose</span></div></>)}<Hn>No keywords = starts on any message. With fuzzy OFF, only an exact match starts the bot. With fuzzy ON, close/partial matches start it, based on the sensitivity.</Hn></Ed>)}
-            {selected.type === "text" && (<Ed title="💬 Send Text"><Lb>Message</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /></Ed>)}
-            {selected.type === "buttons" && (<Ed title="🔘 Send Buttons">
-              <HeaderField header={selected.data.header} setHeader={setHeader} openPicker={() => { setPickerFor("header"); setPickerOpen(true); }} />
-              <Lb>Body text</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} />
-              <Lb>Buttons (max 3)</Lb>
-              {(selected.data.buttons || []).map((b, i) => (<div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}><In value={b.title} maxLength={20} onChange={(v) => { const arr = [...selected.data.buttons]; arr[i] = { ...arr[i], title: v }; updateData(selected.id, { buttons: arr }); }} placeholder={`Button ${i + 1}`} /><button onClick={() => updateData(selected.id, { buttons: selected.data.buttons.filter((_, j) => j !== i) })} style={delMini}>✕</button></div>))}
-              {(selected.data.buttons || []).length < 3 && <button onClick={() => updateData(selected.id, { buttons: [...(selected.data.buttons || []), { title: "" }] })} style={addBtn(NC.buttons)}>+ Add Button</button>}
-              <Lb>Footer (optional)</Lb><In value={selected.data.footer || ""} maxLength={60} onChange={(v) => updateData(selected.id, { footer: v })} placeholder="Footer text" />
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, marginBottom: 2, cursor: "pointer", fontSize: 12.5, color: D.text }}><input type="checkbox" checked={!!selected.data.textMenu} onChange={(e) => updateData(selected.id, { textMenu: e.target.checked })} style={{ width: 16, height: 16, accentColor: NC.buttons, cursor: "pointer" }} />Text menu — type a number (never greys out)</label>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, marginBottom: 2, cursor: "pointer", fontSize: 12.5, color: D.text }}><input type="checkbox" checked={!!selected.data.loopMenu} onChange={(e) => updateData(selected.id, { loopMenu: e.target.checked })} style={{ width: 16, height: 16, accentColor: NC.buttons, cursor: "pointer" }} />Keep menu showing after each choice (loop)</label>
-              <Hn>WhatsApp allows up to 3 buttons (max 20 chars each). Connect each button's right dot to the next node.</Hn></Ed>)}
-            {selected.type === "list" && (<Ed title="📋 Send List">
-              <HeaderField header={selected.data.header} setHeader={setHeader} openPicker={() => { setPickerFor("header"); setPickerOpen(true); }} />
-              <Lb>Body text</Lb><Ar value={selected.data.body || ""} onChange={(v) => updateData(selected.id, { body: v })} />
-              <Lb>List button label</Lb><In value={selected.data.button || ""} maxLength={20} onChange={(v) => updateData(selected.id, { button: v })} placeholder="View options" />
-              <Lb>Sections &amp; rows</Lb>
-              {(selected.data.sections || []).map((sec, si) => (
-                <div key={si} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 9, background: D.panel2 }}>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-                    <In value={sec.title} maxLength={24} onChange={(v) => setSections((s) => { s[si].title = v; })} placeholder={`Section ${si + 1} title (optional)`} />
-                    {(selected.data.sections || []).length > 1 && <button onClick={() => setSections((s) => { s.splice(si, 1); })} style={delMini}>✕</button>}
-                  </div>
-                  {(sec.rows || []).map((row, ri) => (
-                    <div key={ri} style={{ border: `1px solid ${D.border}`, borderRadius: 8, padding: 7, marginBottom: 7, background: D.input }}>
-                      <div style={{ display: "flex", gap: 6 }}><In value={row.title} maxLength={24} onChange={(v) => setSections((s) => { s[si].rows[ri].title = v; })} placeholder={`Row ${ri + 1} title`} /><button onClick={() => setSections((s) => { s[si].rows.splice(ri, 1); })} style={delMini}>✕</button></div>
-                      <div style={{ height: 6 }} /><In value={row.description || ""} maxLength={72} onChange={(v) => setSections((s) => { s[si].rows[ri].description = v; })} placeholder="Description (optional)" />
-                    </div>
-                  ))}
-                  {listRowCount(selected.data.sections) < 10 && <button onClick={() => setSections((s) => { s[si].rows.push({ title: "", description: "" }); })} style={addBtn(NC.list)}>+ Add Row</button>}
-                </div>
-              ))}
-              <button onClick={() => setSections((s) => { s.push({ title: "", rows: [{ title: "", description: "" }] }); })} style={{ ...addBtn(NC.list), borderStyle: "solid" }}>+ Add Section</button>
-              <Lb>Footer (optional)</Lb><In value={selected.data.footer || ""} maxLength={60} onChange={(v) => updateData(selected.id, { footer: v })} placeholder="Footer text" />
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, marginBottom: 2, cursor: "pointer", fontSize: 12.5, color: D.text }}><input type="checkbox" checked={!!selected.data.textMenu} onChange={(e) => updateData(selected.id, { textMenu: e.target.checked })} style={{ width: 16, height: 16, accentColor: NC.list, cursor: "pointer" }} />Text menu — type a number (never greys out)</label>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, marginBottom: 2, cursor: "pointer", fontSize: 12.5, color: D.text }}><input type="checkbox" checked={!!selected.data.loopMenu} onChange={(e) => updateData(selected.id, { loopMenu: e.target.checked })} style={{ width: 16, height: 16, accentColor: NC.list, cursor: "pointer" }} />Keep menu showing after each choice (loop)</label>
-              <Hn>Up to 10 rows total across sections. Connect each row's right dot to the next node.</Hn></Ed>)}
-            {selected.type === "media" && (<Ed title="🖼️ Send Media">
-              {selected.data.url ? (<div style={{ marginBottom: 10 }}>
-                {selected.data.mediaType === "image" ? <img src={selected.data.url} alt="" style={{ width: "100%", borderRadius: 8, border: `1px solid ${D.border}` }} />
-                  : <div style={{ padding: 10, border: `1px solid ${D.border}`, borderRadius: 8, background: D.input, color: D.sub, fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><span>{GTYPE[selected.data.mediaType]?.icon || "📄"}</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.data.name || "media"}</span></div>}
-              </div>) : null}
-              <button onClick={() => { setPickerFor("media"); setPickerOpen(true); }} style={addBtn(NC.media)}>📁 Choose from gallery</button>
-              <Lb>Or paste a link</Lb><In value={selected.data.url || ""} onChange={(v) => updateData(selected.id, { url: v, mediaType: guessType(v), name: (v.split("?")[0].split("/").pop() || "") })} placeholder="https://…/file.jpg" />
-              <Lb>Caption (optional)</Lb><Ar value={selected.data.caption || ""} onChange={(v) => updateData(selected.id, { caption: v })} />
-              <Hn>Audio is auto-converted to MP3 for WhatsApp.</Hn></Ed>)}
-            {selected.type === "cta" && (<Ed title="🔗 Send CTA">
-              <HeaderField header={selected.data.header} setHeader={setHeader} openPicker={() => { setPickerFor("header"); setPickerOpen(true); }} />
-              <Lb>Body text</Lb><Ar value={selected.data.body || ""} onChange={(v) => updateData(selected.id, { body: v })} />
-              <Lb>Button text</Lb><In value={selected.data.display || ""} maxLength={20} onChange={(v) => updateData(selected.id, { display: v })} placeholder="Open link" />
-              <Lb>URL</Lb><In value={selected.data.url || ""} onChange={(v) => updateData(selected.id, { url: v })} placeholder="https://…" />
-              <Lb>Footer (optional)</Lb><In value={selected.data.footer || ""} maxLength={60} onChange={(v) => updateData(selected.id, { footer: v })} placeholder="Footer text" />
-              <Hn>Sends your text with a clickable link to the customer.</Hn></Ed>)}
-            {selected.type === "question" && (<Ed title="❓ Ask Question">
-              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Bot asks this, then <b>waits</b> for the customer's reply, saves it, and moves to the next node.</div>
-              <Lb>Message</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} />
-              <Lb>Response format</Lb><Sel value={selected.data.responseFormat || "any"} onChange={(v) => updateData(selected.id, { responseFormat: v })} options={RESPONSE_FORMATS} />
-              <Lb>Save answer as</Lb><In value={selected.data.saveAs || ""} onChange={(v) => updateData(selected.id, { saveAs: v })} placeholder="name, email…" />
-              <Lb>Timeout</Lb>
-              <div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={0} value={selected.data.timeoutValue ?? 0} onChange={(e) => updateData(selected.id, { timeoutValue: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.timeoutUnit || "seconds"} onChange={(v) => updateData(selected.id, { timeoutUnit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div>
-              <Lb>Timeout message (optional)</Lb><Ar value={selected.data.timeoutMessage || ""} onChange={(v) => updateData(selected.id, { timeoutMessage: v })} />
-              <Tog on={!!selected.data.continueOnTimeout} onClick={() => updateData(selected.id, { continueOnTimeout: !selected.data.continueOnTimeout })} label="Continue on timeout" /></Ed>)}
-            {selected.type === "delay" && (<Ed title="⏱️ Delay"><Lb>Wait</Lb><div style={{ display: "flex", gap: 8 }}><input className="cs-in" type="number" min={1} value={selected.data.value || 1} onChange={(e) => updateData(selected.id, { value: e.target.value })} style={{ width: "50%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} /><Sel value={selected.data.unit || "seconds"} onChange={(v) => updateData(selected.id, { unit: v })} options={[["seconds", "Seconds"], ["minutes", "Minutes"]]} /></div><Hn>Pauses the flow before the next step.</Hn></Ed>)}
-            {selected.type === "form" && (<Ed title="📝 Send Form">
-              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>Bot asks each field one by one, saves every answer, then posts the filled form back in the chat.</div>
-              <Lb>Intro message (optional)</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="Please fill this quick form:" />
-              <Lb>Fields</Lb>
-              {(selected.data.fields || []).map((fd, i) => {
-                const ftype = (fd.type) || "text";
-                const setField = (patch) => { const fs = [...selected.data.fields]; fs[i] = { ...fs[i], ...patch }; updateData(selected.id, { fields: fs }); };
-                const opts = fd.options || [];
-                const setOpt = (j, patch) => { const os = [...opts]; os[j] = { ...os[j], ...patch }; setField({ options: os }); };
-                return (
-                <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                    {[["text", "✏️ Text"], ["list", "📋 List"], ["buttons", "🔘 Buttons"]].map(([tv, tl]) => (
-                      <button key={tv} onClick={() => setField({ type: tv })} style={{ flex: 1, padding: "6px 0", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: T.font, border: `1px solid ${ftype === tv ? NC.form : D.border}`, background: ftype === tv ? hexA(NC.form, .18) : D.input, color: ftype === tv ? "#5fe0d0" : D.sub }}>{tl}</button>
-                    ))}
-                  </div>
-                  <Lb>Question {i + 1}</Lb><In value={fd.label} onChange={(v) => setField({ label: v })} placeholder="e.g. Apni location batayein" />
-                  <div style={{ height: 6 }} /><Lb>Save as</Lb><In value={fd.key} onChange={(v) => setField({ key: v.replace(/\s+/g, "_") })} placeholder="location" />
-                  {(ftype === "list" || ftype === "buttons") && (<><div style={{ height: 8 }} /><Lb>Options</Lb>{opts.map((op, j) => (<div key={j} style={{ display: "flex", gap: 5, marginBottom: 5 }}><In value={op.title} onChange={(v) => setOpt(j, { title: v })} placeholder="Option" /><button onClick={() => setField({ options: opts.filter((_, k) => k !== j) })} style={{ ...delMini, width: 30, height: 30, padding: 0 }}>✕</button></div>))}{(ftype === "buttons" ? opts.length < 3 : opts.length < 10) && <button onClick={() => setField({ options: [...opts, { title: "" }] })} style={{ ...addBtn(NC.form), padding: "6px 0", fontSize: 11.5, marginTop: 2 }}>+ Add option</button>}</>)}
-                  {ftype === "list" && (<><div style={{ height: 6 }} /><Lb>List button label</Lb><In value={fd.listButton || ""} maxLength={20} onChange={(v) => setField({ listButton: v })} placeholder="View options" /></>)}
-                  {(selected.data.fields || []).length > 1 && <button onClick={() => updateData(selected.id, { fields: selected.data.fields.filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove field</button>}
-                </div>
-                );
-              })}
-              <button onClick={() => updateData(selected.id, { fields: [...(selected.data.fields || []), { label: "", key: "", type: "text" }] })} style={addBtn(NC.form)}>+ Add Field</button>
-              <Lb>Message after submit</Lb><Ar value={selected.data.submitMessage || ""} onChange={(v) => updateData(selected.id, { submitMessage: v })} placeholder="Shukriya!" />
-              <Lb>Google Sheet link (optional)</Lb><In value={selected.data.sheetUrl || ""} onChange={(v) => updateData(selected.id, { sheetUrl: v })} placeholder="https://docs.google.com/spreadsheets/d/..." /></Ed>)}
-            {selected.type === "catalog" && (<Ed title="🛒 Product Cart">
-              <Lb>Intro message (optional)</Lb><Ar value={selected.data.intro || ""} onChange={(v) => updateData(selected.id, { intro: v })} placeholder="🛒 Welcome!" />
-              <Lb>Products</Lb>
-              {(selected.data.products || []).map((p, i) => {
-                const setP = (patch) => { const ps = [...selected.data.products]; ps[i] = { ...ps[i], ...patch }; updateData(selected.id, { products: ps }); };
-                return (<div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
-                  <Lb>Product name</Lb><In value={p.name} onChange={(v) => setP({ name: v })} placeholder="e.g. Chicken Pizza" />
-                  <div style={{ height: 6 }} /><Lb>Price</Lb><In value={p.price} onChange={(v) => setP({ price: v.replace(/[^\d.]/g, "") })} placeholder="800" />
-                  <div style={{ height: 6 }} /><Lb>Description (optional)</Lb><In value={p.desc} onChange={(v) => setP({ desc: v })} placeholder="e.g. Large, cheese burst" />
-                  {(selected.data.products || []).length > 1 && <button onClick={() => updateData(selected.id, { products: selected.data.products.filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove product</button>}
-                </div>);
-              })}
-              <button onClick={() => updateData(selected.id, { products: [...(selected.data.products || []), { name: "", price: "", desc: "" }] })} style={addBtn(NC.catalog)}>+ Add Product</button>
-              <Lb>Quantity buttons</Lb><In value={selected.data.qtyOptions || "1,2,3,4,5,6,7,8,9,10"} onChange={(v) => updateData(selected.id, { qtyOptions: v })} placeholder="1,2,3,4,5" />
-              <Lb>"Add more" button text</Lb><In value={selected.data.addMore || ""} onChange={(v) => updateData(selected.id, { addMore: v.slice(0, 20) })} placeholder="➕ Add more" />
-              <Lb>"Confirm" button text</Lb><In value={selected.data.checkout || ""} onChange={(v) => updateData(selected.id, { checkout: v.slice(0, 20) })} placeholder="✅ Confirm" />
-              <Lb>Cart message template</Lb><Ar value={selected.data.cartLine || ""} onChange={(v) => updateData(selected.id, { cartLine: v })} placeholder={"🛒 *Aapka cart:*\n{{cart}}\n\n*Total: Rs {{cartTotal}}*"} vars={false} />
-              <Lb>After checkout — questions</Lb>
-              {(selected.data.fields || []).map((fd, i) => {
-                const setField = (patch) => { const fs = [...(selected.data.fields || [])]; fs[i] = { ...fs[i], ...patch }; updateData(selected.id, { fields: fs }); };
-                return (<div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
-                  <Lb>Question {i + 1}</Lb><In value={fd.label} onChange={(v) => setField({ label: v })} placeholder="e.g. Delivery address" />
-                  <div style={{ height: 6 }} /><Lb>Save as</Lb><In value={fd.key} onChange={(v) => setField({ key: v.replace(/\s+/g, "_") })} placeholder="address" />
-                  <button onClick={() => updateData(selected.id, { fields: (selected.data.fields || []).filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove</button>
-                </div>);
-              })}
-              <button onClick={() => updateData(selected.id, { fields: [...(selected.data.fields || []), { label: "", key: "", type: "text" }] })} style={addBtn(NC.catalog)}>+ Add Question</button>
-              <Lb>Message after order</Lb><Ar value={selected.data.submitMessage || ""} onChange={(v) => updateData(selected.id, { submitMessage: v })} placeholder="Shukriya! Aapka order mil gaya 🙌" />
-              <Lb>Google Sheet link (optional)</Lb><In value={selected.data.sheetUrl || ""} onChange={(v) => updateData(selected.id, { sheetUrl: v })} placeholder="https://docs.google.com/spreadsheets/d/..." /></Ed>)}
+        if (b.code_expiration_minutes) {
+          components.push({
+            type: "FOOTER",
+            code_expiration_minutes: parseInt(b.code_expiration_minutes, 10),
+          });
+        }
 
-            {/* ===== APPOINTMENT EDITOR — WhatsApp Flow, no browser, no Calendar ===== */}
-            {selected.type === "appointment" && (<Ed title="📅 Book Appointment">
-              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>
-                Customer ko ek button milega. Tap karne par WhatsApp ke andar hi ek native Flow screen khulega (browser bilkul nahi) — woh date+time slot aur tumhare neeche wale questions ke jawab dega. Submit hone par bot khud slot free hone ka check karega, booking save karega, aur turant tumhari Google Sheet mein row add ho jayegi.
-              </div>
-              <Lb>Message text</Lb>
-              <Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} />
-              <Lb>Button label (max 20 chars)</Lb>
-              <In value={selected.data.buttonText || "Book Appointment"} maxLength={20} onChange={(v) => updateData(selected.id, { buttonText: v })} placeholder="Book Appointment" />
-              <Lb>Footer (optional)</Lb>
-              <In value={selected.data.footer || ""} maxLength={60} onChange={(v) => updateData(selected.id, { footer: v })} placeholder="We'll confirm on WhatsApp" />
-              <div style={{ marginTop: 16, padding: 12, background: hexA(NC.appointment, .07), border: `1px solid ${hexA(NC.appointment, .3)}`, borderRadius: 10 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: NC.appointment, marginBottom: 12 }}>⚙️ Appointment Settings (This Account)</div>
-                <ApptSettings accountId={ACCOUNT_ID} ac={NC.appointment} questions={apptQuestions} onQuestionsChange={setApptQuestions} />
-              </div>
-              <Hn>Slots, Sheet link and Questions are shared across every "Book Appointment" node in this account. The WhatsApp Flow itself is created separately per WhatsApp number below, since each number has its own Meta account.</Hn>
-            </Ed>)}
+        components.push({
+          type: "BUTTONS",
+          buttons: [{ type: "OTP", otp_type: "COPY_CODE", text: b.button_text || "Copy Code" }],
+        });
+      } else {
+        /* ---- HEADER ---- */
+        const h = b.header || {};
+        const hType = String(h.type || b.header_type || "NONE").toUpperCase();
 
-            {selected.type === "condition" && (<Ed title="🔀 Condition">
-              <div style={{ fontSize: 11.5, color: D.sub, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8 }}>If the check is <b style={{ color: NC.buttons }}>true</b> → green line. If <b style={{ color: NC.stop }}>false</b> → red line.</div>
-              <Lb>Match</Lb><Sel value={selected.data.match || "all"} onChange={(v) => updateData(selected.id, { match: v })} options={[["all", "All conditions must be true"], ["any", "Any one condition is enough"]]} />
-              <Lb>Conditions</Lb>
-              {(selected.data.conditions || []).map((c, i) => { const noSecond = c.operator === "is_email" || c.operator === "is_phone"; return (
-                <div key={i} style={{ border: `1px solid ${D.border}`, borderRadius: 9, padding: 9, marginBottom: 8, background: D.panel2 }}>
-                  <Lb>Check this</Lb><In value={c.first} onChange={(v) => setCond(i, { first: v })} placeholder="{{last_message}}" />
-                  <div style={{ height: 6 }} /><Lb>Operator</Lb><Sel value={c.operator || "equals"} onChange={(v) => setCond(i, { operator: v })} options={OPERATORS} />
-                  {!noSecond && (<><div style={{ height: 6 }} /><Lb>Against this value</Lb><In value={c.second} onChange={(v) => setCond(i, { second: v })} placeholder="e.g. yes" /></>)}
-                  {(selected.data.conditions || []).length > 1 && <button onClick={() => updateData(selected.id, { conditions: selected.data.conditions.filter((_, j) => j !== i) })} style={{ ...delMini, marginTop: 8, width: "100%", padding: "6px 0" }}>✕ Remove</button>}
-                </div>); })}
-              <button onClick={() => updateData(selected.id, { conditions: [...(selected.data.conditions || []), { first: "{{last_message}}", operator: "contains", second: "" }] })} style={addBtn(NC.condition)}>+ Add Condition</button></Ed>)}
-            {selected.type === "tag" && (<Ed title="🏷️ Update Tag">
-              <Lb>Tags to assign</Lb>
-              {curTags.length > 0 && (<div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                {curTags.map((l) => (<span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 3px 9px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, background: hexA(NC.tag, .16), color: NC.tag, border: `1px solid ${hexA(NC.tag, .4)}` }}>{l}<span onClick={() => toggleTag(l)} style={{ cursor: "pointer", width: 15, height: 15, borderRadius: "50%", display: "grid", placeItems: "center", background: hexA(NC.tag, .25) }}>×</span></span>))}
-              </div>)}
-              <input className="cs-in" value={tagSearch} onChange={(e) => setTagSearch(e.target.value)} placeholder="Search or type a new tag…" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: `1px solid ${D.border}`, background: D.input, fontSize: 12.5, boxSizing: "border-box", fontFamily: T.font, color: D.text }} />
-              <div style={{ marginTop: 6, maxHeight: 170, overflowY: "auto", border: `1px solid ${D.border}`, borderRadius: 8, background: D.panel2 }}>
-                {allLabels.filter((l) => l.toLowerCase().includes(tagSearch.toLowerCase())).map((l) => { const on = curTags.includes(l); return (<div key={l} className="cs-row" onClick={() => toggleTag(l)} style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", color: D.text, display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: on ? NC.tag : D.faint }}>{on ? "✓" : "○"}</span>{l}</div>); })}
-                {tagSearch.trim() && !allLabels.some((l) => l.toLowerCase() === tagSearch.trim().toLowerCase()) && (<div className="cs-row" onClick={() => { toggleTag(tagSearch.trim()); setTagSearch(""); }} style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", color: NC.tag, fontWeight: 600 }}>+ Create "{tagSearch.trim()}"</div>)}
-                {allLabels.length === 0 && !tagSearch.trim() && <div style={{ padding: "10px 12px", fontSize: 12, color: D.faint }}>No tags yet — type above to create one.</div>}
-              </div></Ed>)}
-            {selected.type === "stop" && (<Ed title="🛑 Stop Chatbot / Talk to Human"><Lb>Message (optional)</Lb><Ar value={selected.data.text || ""} onChange={(v) => updateData(selected.id, { text: v })} /><Hn>Stops the bot and opens the conversation for a human agent.</Hn></Ed>)}
+        if (hType === "TEXT" && (h.text || b.header_text)) {
+          const comp = { type: "HEADER", format: "TEXT", text: String(h.text || b.header_text) };
+          const ex = h.example || b.header_example;
+          if (Array.isArray(ex) && ex.length) comp.example = { header_text: ex };
+          components.push(comp);
+        } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(hType)) {
+          const handle = h.handle || b.header_handle;
+          const comp = { type: "HEADER", format: hType };
+          if (handle) comp.example = { header_handle: [handle] };
+          components.push(comp);
+        }
 
-            {selected.deletable !== false && (
-              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-                <button onClick={() => { const id = `n${++idRef.current}`; const newNode = { id, type: selected.type, position: { x: selected.position.x + 36, y: selected.position.y + 60 }, data: JSON.parse(JSON.stringify(selected.data)) }; setNodes((nds) => [...nds, newNode]); setSelectedId(id); }} style={{ flex: 1, padding: "9px 12px", border: `1px solid ${D.border}`, color: D.text, background: D.panel2, borderRadius: 8, cursor: "pointer", fontFamily: T.font, fontSize: 13, fontWeight: 600 }}>⧉ Duplicate node</button>
-                <button onClick={() => { setNodes((nds) => nds.filter((n) => n.id !== selected.id)); setEdges((e) => e.filter((ed) => ed.source !== selected.id && ed.target !== selected.id)); setSelectedId(null); }} style={{ flex: 1, padding: "9px 12px", border: `1px solid ${hexA(NC.stop, .5)}`, color: "#fb7185", background: hexA(NC.stop, .08), borderRadius: 8, cursor: "pointer", fontFamily: T.font, fontSize: 13 }}>Delete node</button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+        /* ---- BODY ---- */
+        const cards = Array.isArray(b.cards) ? b.cards : [];
+        const bodyText = b.body_text || (b.body && b.body.text) || b.text || "";
+        if (!bodyText && !cards.length) {
+          return res.json({ ok: false, error: "body ka text chahiye" });
+        }
+        if (bodyText) {
+          const bodyComp = { type: "BODY", text: String(bodyText) };
+          const bodyEx = b.body_example || (b.body && b.body.example);
+          if (Array.isArray(bodyEx) && bodyEx.length) {
+            bodyComp.example = { body_text: [bodyEx] };
+          }
+          components.push(bodyComp);
+        }
 
-      {pickerOpen && selected && (
-        <MediaPicker onClose={() => setPickerOpen(false)} onPick={(m) => { if (pickerFor === "header") { setHeader({ ...(selected.data.header || { type: "none", value: "" }), value: m.url }); } else { updateData(selected.id, { url: m.url, mediaType: m.type, name: m.original_name || m.filename || "" }); } setPickerOpen(false); }} />
-      )}
-    </div>
-  );
+        /* ---- FOOTER ---- */
+        const footer = b.footer_text || (b.footer && b.footer.text);
+        if (footer) components.push({ type: "FOOTER", text: String(footer) });
+
+        /* ---- BUTTONS ---- */
+        const btns = Array.isArray(b.buttons) ? b.buttons : [];
+        if (btns.length) {
+          components.push({
+            type: "BUTTONS",
+            buttons: btns.map((x) => {
+              const t = String(x.type || "QUICK_REPLY").toUpperCase();
+              if (t === "URL") return { type: "URL", text: x.text, url: x.url };
+              if (t === "PHONE_NUMBER")
+                return { type: "PHONE_NUMBER", text: x.text, phone_number: x.phone_number };
+              return { type: "QUICK_REPLY", text: x.text };
+            }),
+          });
+        }
+
+        /* ---- CAROUSEL ---- */
+        if (cards.length) {
+          components.push({
+            type: "CAROUSEL",
+            cards: cards.map((c) => {
+              const cc = [];
+              const ct = String(c.header_type || "IMAGE").toUpperCase();
+              const chandle = c.header_handle;
+              const hc = { type: "HEADER", format: ct };
+              if (chandle) hc.example = { header_handle: [chandle] };
+              cc.push(hc);
+              cc.push({ type: "BODY", text: String(c.body_text || "") });
+              const cb = Array.isArray(c.buttons) ? c.buttons : [];
+              if (cb.length) {
+                cc.push({
+                  type: "BUTTONS",
+                  buttons: cb.map((x) => {
+                    const t = String(x.type || "QUICK_REPLY").toUpperCase();
+                    if (t === "URL") return { type: "URL", text: x.text, url: x.url };
+                    if (t === "PHONE_NUMBER")
+                      return { type: "PHONE_NUMBER", text: x.text, phone_number: x.phone_number };
+                    return { type: "QUICK_REPLY", text: x.text };
+                  }),
+                });
+              }
+              return { components: cc };
+            }),
+          });
+        }
+      }
+    }
+
+    const payload = { name, language, category, components };
+
+    const r = await cw.post(
+      `https://graph.facebook.com/${WA_VER}/${ctx.wabaId}/message_templates`,
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${ctx.creds.token}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 25000,
+      }
+    );
+
+    res.json({ ok: true, template: r.data });
+  } catch (e) {
+    console.error("POST /api/templates", e.response?.data || e.message);
+    res.status(200).json(metaErr(e));
+  }
+});
+
+/* ---------- DELETE ---------- */
+app.delete("/api/templates", async (req, res) => {
+  try {
+    const ctx = await tplContext(req, res);
+    if (!ctx) return;
+
+    const name = String(req.query.name || (req.body || {}).name || "").trim();
+    if (!name) return res.json({ ok: false, error: "name chahiye" });
+
+    const r = await cw.delete(
+      `https://graph.facebook.com/${WA_VER}/${ctx.wabaId}/message_templates`,
+      {
+        params: { name },
+        headers: { Authorization: `Bearer ${ctx.creds.token}` },
+        timeout: 20000,
+      }
+    );
+
+    res.json({ ok: true, result: r.data });
+  } catch (e) {
+    console.error("DELETE /api/templates", e.response?.data || e.message);
+    res.status(200).json(metaErr(e));
+  }
+});
+
+async function start() {
+  await initDb();
+  await seedFlowIfEmpty(3, seedFlow);
+  app.listen(PORT, () => console.log(`ChatsSync bot engine listening on port ${PORT} | uploads: ${UPLOAD_DIR}`));
 }
-
-const delMini = { border: `1px solid ${hexA(NC.stop, .5)}`, color: "#fb7185", background: "transparent", borderRadius: 6, cursor: "pointer", padding: "0 10px", fontFamily: T.font, fontSize: 13 };
-const addBtn = (c) => ({ marginTop: 4, padding: "9px 12px", border: `1px dashed ${c}`, color: c, background: hexA(c, .08), borderRadius: 8, cursor: "pointer", width: "100%", fontFamily: T.font, fontSize: 13, fontWeight: 600 });
-
-function HeaderField({ header, setHeader, openPicker }) {
-  const h = header || { type: "none", value: "" };
-  return (<>
-    <Lb>Header Type</Lb>
-    <Sel value={h.type} onChange={(v) => setHeader({ type: v, value: "" })} options={HEADER_TYPES} />
-    {h.type === "text" && (<><div style={{ height: 6 }} /><In value={h.value} maxLength={60} onChange={(v) => setHeader({ type: "text", value: v })} placeholder="Header text" /></>)}
-    {(h.type === "image" || h.type === "video" || h.type === "document") && (<><div style={{ height: 6 }} /><button onClick={openPicker} style={addBtn(NC.media)}>📁 Choose header media</button><In value={h.value} onChange={(v) => setHeader({ type: h.type, value: v })} placeholder="https://… or pick from gallery" /></>)}
-  </>);
-}
-function Ed({ title, children }) { return (<div><div style={{ fontWeight: 700, marginBottom: 12, color: D.text, fontSize: 14 }}>{title}</div>{children}</div>); }
-function Lb({ children }) { return <div style={{ fontSize: 12, fontWeight: 600, color: D.sub, margin: "10px 0 4px" }}>{children}</div>; }
-function Hn({ children }) { return <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
-function In({ value, onChange, placeholder, maxLength }) { return (<input className="cs-in" value={value} placeholder={placeholder} maxLength={maxLength} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font }} />); }
-const CHAT_VARS = [{ key: "senderName", label: "Name" }, { key: "senderId", label: "Number" }, { key: "message", label: "Their message" }, { key: "receiverId", label: "Your number" }];
-function Ar({ value, onChange, vars = true }) {
-  const ref = useRef(null);
-  const insertVar = (token) => {
-    const el = ref.current; const cur = value || ""; let start = cur.length, end = cur.length;
-    if (el && typeof el.selectionStart === "number") { start = el.selectionStart; end = el.selectionEnd; }
-    const next = cur.slice(0, start) + token + cur.slice(end); onChange(next);
-    requestAnimationFrame(() => { if (el) { const pos = start + token.length; el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {} } });
-  };
-  return (
-    <div>
-      <textarea ref={ref} className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} rows={4} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", resize: "vertical", fontFamily: T.font }} />
-      {vars && (<div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6, alignItems: "center" }}>
-        <span style={{ fontSize: 10.5, color: D.faint, marginRight: 2 }}>Insert:</span>
-        {CHAT_VARS.map((v) => (<button key={v.key} type="button" onClick={() => insertVar(`{{${v.key}}}`)} style={{ fontSize: 10.5, fontWeight: 600, color: T.blue, background: "rgba(76,132,255,.12)", border: "1px solid rgba(76,132,255,.28)", borderRadius: 100, padding: "3px 9px", cursor: "pointer", fontFamily: T.font, lineHeight: 1.3 }}>{v.label}</button>))}
-      </div>)}
-    </div>
-  );
-}
-function Sel({ value, onChange, options }) { return (<select className="cs-in" value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: T.font, cursor: "pointer" }}>{options.map(([v, l]) => (<option key={v} value={v} style={{ background: D.panel2 }}>{l}</option>))}</select>); }
-function KeywordChips({ value, onChange }) {
-  const [input, setInput] = useState("");
-  const chips = (value || "").split(",").map((x) => x.trim()).filter(Boolean);
-  const add = (raw) => { const t = (raw || "").trim().replace(/,+$/, "").trim(); if (!t) { setInput(""); return; } if (!chips.some((c) => c.toLowerCase() === t.toLowerCase())) onChange([...chips, t].join(", ")); setInput(""); };
-  const remove = (i) => onChange(chips.filter((_, j) => j !== i).join(", "));
-  return (
-    <div style={{ border: "1px solid #2A3340", borderRadius: 7, background: D.input, padding: "6px 8px", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-      {chips.map((c, i) => (<span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 3px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: hexA(NC.start, .16), color: NC.start, border: `1px solid ${hexA(NC.start, .4)}` }}>{c}<span onClick={() => remove(i)} style={{ cursor: "pointer", width: 16, height: 16, borderRadius: "50%", display: "grid", placeItems: "center", background: hexA(NC.start, .25) }}>×</span></span>))}
-      <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(input); } else if (e.key === "Backspace" && !input && chips.length) { remove(chips.length - 1); } }} onBlur={() => add(input)} placeholder={chips.length ? "Add keyword…" : "Type a keyword, press Enter"} style={{ flex: 1, minWidth: 120, border: "none", outline: "none", background: "transparent", color: D.text, fontSize: 13, fontFamily: T.font, padding: "3px 0" }} />
-    </div>
-  );
-}
-function Slider({ value, onChange }) { return (<input type="range" min={50} max={100} step={5} value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: NC.start, cursor: "pointer" }} />); }
-function Tog({ on, onClick, label }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: "10px 0 2px" }}><div style={{ width: 34, height: 20, borderRadius: 999, background: on ? NC.buttons : "#3a4456", position: "relative", transition: "background .15s", flexShrink: 0 }}><div style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} /></div><span style={{ fontSize: 12.5, color: D.text }}>{label}</span></div>); }
-
-// Templates section (kept intact — unrelated to appointments)
-const TPL_CATS = [["MARKETING","Marketing","Promos, offers & news","📣"],["UTILITY","Utility","Order & account updates","🧾"],["AUTHENTICATION","Authentication","One-time passcodes","🔐"]];
-const TPL_HDRS = [["none","None","⊘"],["text","Text","T"],["image","Image","🖼️"],["video","Video","🎬"],["document","Document","📄"]];
-const TPL_LANGS2 = [["en","English"],["en_US","English (US)"],["en_GB","English (UK)"],["ur","Urdu"],["hi","Hindi"],["ar","Arabic"],["bn","Bengali"],["pa","Punjabi"],["es","Spanish"],["es_MX","Spanish (MX)"],["pt_BR","Portuguese (BR)"],["fr","French"],["de","German"],["it","Italian"],["nl","Dutch"],["ru","Russian"],["tr","Turkish"],["id","Indonesian"],["ms","Malay"],["fil","Filipino"],["th","Thai"],["vi","Vietnamese"],["zh_CN","Chinese (CN)"],["ja","Japanese"],["ko","Korean"],["fa","Persian"],["ps","Pashto"],["af","Afrikaans"],["ar_EG","Arabic (EG)"],["el","Greek"],["gu","Gujarati"],["he","Hebrew"],["kn","Kannada"],["ml","Malayalam"],["mr","Marathi"],["pl","Polish"],["ro","Romanian"],["sv","Swedish"],["ta","Tamil"],["te","Telugu"],["uk","Ukrainian"]];
-const TPL_NUM_COLS="1.5fr 1fr 1.25fr 1.4fr 0.8fr 1fr";const TPL_LIST_COLS="1.7fr 1fr 1fr 0.65fr 1.8fr 1fr";
-function tStatus(s){const x=String(s||"").toUpperCase();if(x==="APPROVED")return{dot:"#34d399",bg:"rgba(52,211,153,.12)",fg:"#34d399",label:"Approved"};if(["PENDING","IN_APPEAL","PENDING_DELETION"].includes(x))return{dot:"#fbbf24",bg:"rgba(251,191,36,.12)",fg:"#fbbf24",label:x==="PENDING"?"In review":"Pending"};if(["REJECTED","DISABLED","PAUSED"].includes(x))return{dot:"#fb7185",bg:"rgba(251,113,133,.12)",fg:"#fb7185",label:x.charAt(0)+x.slice(1).toLowerCase()};return{dot:D.faint,bg:"rgba(124,134,150,.1)",fg:D.sub,label:x?x.charAt(0)+x.slice(1).toLowerCase():"Draft"};}
-function tCat(c){const x=String(c||"").toUpperCase();if(x==="MARKETING")return{c:NC.cta,label:"Marketing"};if(x==="UTILITY")return{c:NC.buttons,label:"Utility"};if(x==="AUTHENTICATION")return{c:NC.list,label:"Authentication"};return{c:D.sub,label:x||"—"};}
-function tParse(components){let header=null,body="",footer="",buttons=[],cards=[];for(const c of(components||[])){const t=(c.type||"").toUpperCase();if(t==="HEADER")header={format:(c.format||"TEXT").toLowerCase(),text:c.text||""};else if(t==="BODY")body=c.text||"";else if(t==="FOOTER")footer=c.text||"";else if(t==="BUTTONS")buttons=c.buttons||[];else if(t==="CAROUSEL")cards=c.cards||[];}return{header,body,footer,buttons,cards};}
-function tVars(text){const m=String(text||"").match(/\{\{\s*\d+\s*\}\}/g);if(!m)return 0;return Math.max(0,...m.map((x)=>parseInt(x.replace(/\D/g,""),10)));}
-function tMd(text){let s=String(text||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");s=s.replace(/\*(.+?)\*/g,"<b>$1</b>").replace(/_(.+?)_/g,"<i>$1</i>").replace(/~(.+?)~/g,"<s>$1</s>").replace(/```(.+?)```/g,"<code>$1</code>").replace(/\n/g,"<br/>");return s;}
-function tFill(text,ex){return String(text||"").replace(/\{\{\s*(\d+)\s*\}\}/g,(_,n)=>{const v=(ex||[])[parseInt(n,10)-1];return v||"{{"+n+"}}"});}
-function tPlain(text){return String(text||"").replace(/[*_~`]/g,"").replace(/\n+/g," ").trim();}
-const tBtnPri={display:"inline-flex",alignItems:"center",gap:6,padding:"8px 15px",background:T.blue,color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:T.font};
-const tBtnGhost={display:"inline-flex",alignItems:"center",gap:6,padding:"8px 14px",background:D.panel2,color:D.text,border:`1px solid ${D.border}`,borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:500,fontFamily:T.font};
-const tBtnIcon={width:36,height:36,borderRadius:8,border:`1px solid ${D.border}`,background:D.panel2,color:D.sub,cursor:"pointer",fontSize:15,fontFamily:T.font,display:"grid",placeItems:"center"};
-function Crumb({items}){return(<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,marginBottom:12,flexWrap:"wrap"}}>{items.map((it,i)=>(<span key={i} style={{display:"inline-flex",alignItems:"center",gap:7}}>{i>0&&<span style={{color:D.faint,opacity:.6}}>›</span>}<span onClick={it.onClick} style={{cursor:it.onClick?"pointer":"default",color:it.active?D.sub:D.faint,fontWeight:it.active?600:500}}>{it.label}</span></span>))}</div>);}
-function CopyCell({value,mono}){const[done,setDone]=useState(false);if(!value)return<span style={{color:D.faint,fontSize:12.5}}>—</span>;const show=String(value).length>20?String(value).slice(0,9)+"…"+String(value).slice(-7):String(value);return(<div style={{display:"inline-flex",alignItems:"center",gap:7,maxWidth:"100%",minWidth:0}}><span title={String(value)} style={{fontSize:12.5,color:D.text,fontFamily:mono?"monospace":T.font,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{show}</span><button onClick={()=>{if(copyText(String(value))){setDone(true);setTimeout(()=>setDone(false),1200);}}} title="Copy" style={{flexShrink:0,width:24,height:24,borderRadius:6,border:`1px solid ${D.border}`,background:done?hexA(NC.buttons,.16):D.panel2,color:done?"#4ade80":D.sub,cursor:"pointer",fontSize:11,display:"grid",placeItems:"center"}}>{done?"✓":"⧉"}</button></div>);}
-
-function Templates(){const[inboxes,setInboxes]=useState(null);const[picked,setPicked]=useState(null);const[err,setErr]=useState("");const[syncKey,setSyncKey]=useState(0);const isMobile=useIsMobile();const loadInboxes=async()=>{setErr("");try{const j=await(await fetch(`${API}/api/inboxes?account_id=${ACCOUNT_ID}`)).json();const wa=(j.inboxes||[]).filter((i)=>(i.channel_type||"").toLowerCase().includes("whatsapp"));setInboxes(wa.length?wa:(j.inboxes||[]));}catch{setInboxes([]);setErr("Couldn't load your WhatsApp numbers.");}};useEffect(()=>{loadInboxes();},[]);if(picked)return<TemplatesList inbox={picked} onBack={()=>setPicked(null)}/>;return(<div style={{minHeight:"100vh",background:D.bg,fontFamily:T.font,color:D.text}}><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"18px 16px 44px":"22px 24px 50px"}}><Crumb items={[{label:"Dashboard"},{label:"Manage"},{label:"WhatsApp Templates",active:true}]}/><div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:18,flexWrap:"wrap"}}><div><div style={{fontSize:isMobile?19:22,fontWeight:700,letterSpacing:"-.01em"}}>WhatsApp Templates</div><div style={{fontSize:13,color:D.sub,marginTop:3}}>Manage message templates for each of your numbers</div></div><button className="cs-pub" onClick={()=>{setInboxes(null);setSyncKey((k)=>k+1);loadInboxes();}} style={tBtnGhost}>↻ Sync Numbers</button></div>{err&&<Bnr kind="err" onX={()=>setErr("")}>{err}</Bnr>}{inboxes===null&&<div style={{color:D.sub,fontSize:13,padding:40,textAlign:"center",border:`1px solid ${D.border}`,borderRadius:12,background:D.card}}>Loading numbers…</div>}{inboxes&&inboxes.length===0&&<Empty icon="📞" title="No WhatsApp numbers found" sub="Connect a WhatsApp Cloud number in ChatsSync first, then come back to create templates."/>}{inboxes&&inboxes.length>0&&(isMobile?(<div style={{display:"flex",flexDirection:"column",gap:12}}>{inboxes.map((ib)=><NumberRow key={ib.id} inbox={ib} syncKey={syncKey} isMobile onManage={()=>setPicked(ib)}/>)}</div>):(<div style={{border:`1px solid ${D.border}`,borderRadius:12,overflow:"hidden",background:D.card}}><div style={{display:"grid",gridTemplateColumns:TPL_NUM_COLS,padding:"11px 18px",background:D.panel2,fontSize:11.5,fontWeight:700,color:D.sub,textTransform:"uppercase",letterSpacing:".04em"}}><div>Verified Name</div><div>Business App</div><div>Phone Number</div><div>WABA ID</div><div style={{textAlign:"center"}}>Templates</div><div style={{textAlign:"right"}}>Actions</div></div>{inboxes.map((ib)=><NumberRow key={ib.id} inbox={ib} syncKey={syncKey} onManage={()=>setPicked(ib)}/>)}</div>))}</div></div>);}
-
-function NumberRow({inbox,onManage,syncKey,isMobile}){const[meta,setMeta]=useState(null);const[count,setCount]=useState(null);useEffect(()=>{let alive=true;(async()=>{try{const j=await(await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json();if(alive&&j.ok)setMeta(j);}catch{}})();(async()=>{try{const j=await(await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json();if(alive&&j.ok)setCount((j.templates||[]).length);}catch{}})();return()=>{alive=false;};},[inbox.id,syncKey]);const dot=<span style={{width:8,height:8,borderRadius:"50%",flexShrink:0,background:meta?"#34d399":D.faint,boxShadow:meta?"0 0 7px rgba(52,211,153,.6)":"none"}}/>;const cloud=<span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:7,fontSize:11.5,fontWeight:600,background:hexA(ACCENT,.12),color:"#9ec1ff",border:`1px solid ${hexA(ACCENT,.25)}`}}>☁ Cloud API</span>;const cnt=<span style={{fontSize:12.5,fontWeight:700,color:count==null?D.faint:D.text,padding:"2px 11px",borderRadius:999,background:D.panel2,border:`1px solid ${D.border}`}}>{count==null?"…":count}</span>;if(isMobile){return(<div style={{background:D.card,border:`1px solid ${D.border}`,borderRadius:12,padding:14}}><div style={{display:"flex",alignItems:"center",gap:9,marginBottom:12}}>{dot}<span title={inbox.name} style={{fontSize:15,fontWeight:600,color:"#f0a868",flex:1,minWidth:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inbox.name}</span>{cloud}</div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:13}}><Kv label="Phone"><CopyCell value={meta?.phone}/></Kv><Kv label="WABA ID"><CopyCell value={meta?.waba_id} mono/></Kv><Kv label="Templates">{cnt}</Kv></div><button className="cs-pub" onClick={onManage} style={{...tBtnPri,width:"100%",justifyContent:"center"}}>Manage Templates →</button></div>);}return(<div className="cs-row" style={{display:"grid",gridTemplateColumns:TPL_NUM_COLS,alignItems:"center",padding:"13px 18px",borderTop:`1px solid ${D.border}`}}><div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>{dot}<span title={inbox.name} style={{fontSize:14,fontWeight:600,color:"#f0a868",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inbox.name}</span></div><div>{cloud}</div><div style={{minWidth:0}}><CopyCell value={meta?.phone}/></div><div style={{minWidth:0}}><CopyCell value={meta?.waba_id} mono/></div><div style={{textAlign:"center"}}>{cnt}</div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button className="cs-pub" onClick={onManage} style={{...tBtnPri,padding:"7px 15px"}}>Manage →</button></div></div>);}
-function Kv({label,children}){return(<div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:11,fontWeight:700,color:D.faint,textTransform:"uppercase",letterSpacing:".04em",minWidth:78}}>{label}</span><div style={{minWidth:0,flex:1}}>{children}</div></div>);}
-
-function TemplatesList({inbox,onBack}){const[list,setList]=useState(null);const[err,setErr]=useState("");const[msg,setMsg]=useState("");const[creating,setCreating]=useState(false);const[editFrom,setEditFrom]=useState(null);const[viewTpl,setViewTpl]=useState(null);const[confirmDel,setConfirmDel]=useState(null);const[menu,setMenu]=useState(null);const[search,setSearch]=useState("");const[tab,setTab]=useState("all");const isMobile=useIsMobile();const IID=inbox.id;const load=async()=>{setErr("");try{const j=await(await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${IID}`)).json();if(j.ok)setList(j.templates||[]);else{setList([]);setErr(j.error||"Couldn't load templates.");}}catch{setList([]);setErr("Couldn't reach the server.");}};useEffect(()=>{load();},[IID]);const doDelete=async()=>{const t=confirmDel;setConfirmDel(null);if(!t)return;try{const j=await(await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${IID}&name=${encodeURIComponent(t.name)}`,{method:"DELETE"})).json();if(j.ok){setMsg(`Deleted "${t.name}".`);load();}else setErr(j.error||"Delete failed.");}catch{setErr("Delete failed.");}};const dup=(t)=>{setMenu(null);const p=tParse(t.components);setEditFrom({name:t.name+"_copy",language:t.language,category:t.category,header:p.header,body:p.body,footer:p.footer,buttons:p.buttons,cards:p.cards});setCreating(true);};if(creating)return<Builder inbox={inbox} prefill={editFrom} onClose={()=>{setCreating(false);setEditFrom(null);}} onDone={()=>{setCreating(false);setEditFrom(null);setMsg("Submitted to WhatsApp for review.");load();}}/>;const q=search.trim().toLowerCase();const counts={all:(list||[]).length,APPROVED:0,PENDING:0,REJECTED:0};(list||[]).forEach((t)=>{const s=String(t.status||"").toUpperCase();if(s==="APPROVED")counts.APPROVED++;else if(["REJECTED","DISABLED","PAUSED"].includes(s))counts.REJECTED++;else counts.PENDING++;});const tabs=[["all","All"],["APPROVED","Approved"],["PENDING","In review"],["REJECTED","Rejected"]];const rows=(list||[]).filter((t)=>{if(q&&!`${t.name} ${t.category} ${t.language}`.toLowerCase().includes(q))return false;if(tab!=="all"){const s=String(t.status||"").toUpperCase();if(tab==="REJECTED")return["REJECTED","DISABLED","PAUSED"].includes(s);if(tab==="PENDING")return!["APPROVED","REJECTED","DISABLED","PAUSED"].includes(s);return s===tab;}return true;});const newBtn=<button className="cs-pub" onClick={()=>{setMsg("");setErr("");setEditFrom(null);setCreating(true);}} style={tBtnPri}><span style={{fontSize:15}}>＋</span> New Template</button>;return(<div style={{minHeight:"100vh",background:D.bg,fontFamily:T.font,color:D.text}}><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"18px 16px 4px":"22px 24px 4px"}}><Crumb items={[{label:"Dashboard"},{label:"Manage",onClick:onBack},{label:inbox.name,onClick:onBack},{label:"Templates",active:true}]}/><div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}><div style={{display:"flex",alignItems:"center",gap:12,minWidth:0}}><button onClick={onBack} style={tBtnIcon}>←</button><div style={{minWidth:0}}><div style={{fontSize:isMobile?18:21,fontWeight:700,letterSpacing:"-.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inbox.name}</div><div style={{fontSize:12.5,color:D.sub,marginTop:2}}>WhatsApp message templates</div></div></div><div style={{display:"flex",gap:10}}><button onClick={load} style={tBtnIcon} title="Refresh">↻</button>{newBtn}</div></div></div><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"14px 16px 12px":"16px 24px 12px",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>{tabs.map(([k,l])=>{const on=tab===k;return(<button key={k} onClick={()=>setTab(k)} style={{display:"inline-flex",alignItems:"center",gap:7,padding:"7px 13px",borderRadius:8,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:T.font,border:`1px solid ${on?hexA(ACCENT,.55):D.border}`,background:on?hexA(ACCENT,.14):"transparent",color:on?"#bdd4ff":D.sub}}>{l}<span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:999,background:on?hexA(ACCENT,.25):D.panel2,color:on?"#dbe7ff":D.faint}}>{counts[k]??0}</span></button>);})}<input className="cs-in" value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search templates…" style={{marginLeft:isMobile?0:"auto",width:isMobile?"100%":"auto",padding:"8px 13px",borderRadius:8,fontSize:13,fontFamily:T.font,minWidth:isMobile?0:230,boxSizing:"border-box"}}/></div><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"4px 16px 44px":"4px 24px 44px"}}>{msg&&<Bnr kind="ok" onX={()=>setMsg("")}>{msg}</Bnr>}{err&&<Bnr kind="err" onX={()=>setErr("")}>{err}</Bnr>}{list===null&&<div style={{color:D.sub,fontSize:14,padding:30,textAlign:"center"}}>Loading templates…</div>}{list&&rows.length===0&&<Empty icon="📋" title={list.length===0?"No templates yet":"Nothing matches"} sub={list.length===0?"Create your first template and send it for approval.":"Try a different search or filter."} action={list.length===0?newBtn:null}/>}{list&&rows.length>0&&isMobile&&(<div style={{display:"flex",flexDirection:"column",gap:11}}>{rows.map((t,i)=>{const st=tStatus(t.status);const ct=tCat(t.category);const p=tParse(t.components);const car=p.cards.length;const plain=tPlain(p.body);return(<div key={t.id||t.name+i} style={{background:D.card,border:`1px solid ${D.border}`,borderRadius:12,padding:13}}><div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:9}}><div onClick={()=>setViewTpl(t)} style={{flex:1,minWidth:0,fontSize:14,fontWeight:600,wordBreak:"break-word"}}>{t.name}</div><span style={{flexShrink:0,display:"inline-flex",alignItems:"center",gap:5,padding:"2px 9px",borderRadius:999,fontSize:11,fontWeight:700,background:st.bg,color:st.fg}}><span style={{width:6,height:6,borderRadius:"50%",background:st.dot}}/>{st.label}</span></div><div style={{display:"flex",alignItems:"center",gap:7,marginBottom:9,flexWrap:"wrap"}}><span style={{padding:"2px 9px",borderRadius:7,fontSize:11,fontWeight:600,background:hexA(ct.c,.14),color:ct.c,border:`1px solid ${hexA(ct.c,.3)}`}}>{ct.label}</span><span style={{fontSize:11,color:D.faint,fontWeight:700,textTransform:"uppercase"}}>{t.language}</span>{p.header?.format&&p.header.format!=="text"&&<span style={{fontSize:12}}>{p.header.format==="image"?"🖼️":p.header.format==="video"?"🎬":"📄"}</span>}{car>0&&<span style={{fontSize:10.5,fontWeight:700,padding:"1px 7px",borderRadius:6,background:hexA(NC.list,.16),color:NC.list}}>🎠 {car}</span>}</div><div onClick={()=>setViewTpl(t)} style={{fontSize:12.5,color:D.sub,lineHeight:1.45,marginBottom:11,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{plain||<span style={{color:D.faint}}>No body text</span>}</div><div style={{display:"flex",gap:8}}><button onClick={()=>setViewTpl(t)} style={{...tBtnGhost,flex:1,justifyContent:"center"}}>Preview</button><button onClick={()=>dup(t)} style={tBtnIcon} title="Duplicate">⧉</button><button onClick={()=>setConfirmDel(t)} style={{...tBtnIcon,color:"#fb7185",borderColor:hexA(NC.stop,.4)}} title="Delete">🗑</button></div></div>);})}</div>)}{list&&rows.length>0&&!isMobile&&(<div style={{border:`1px solid ${D.border}`,borderRadius:12,overflow:"hidden",background:D.card}}><div style={{display:"grid",gridTemplateColumns:TPL_LIST_COLS,padding:"11px 18px",background:D.panel2,fontSize:11.5,fontWeight:700,color:D.sub,textTransform:"uppercase",letterSpacing:".04em"}}><div>Name</div><div>Status</div><div>Category</div><div>Lang</div><div>Content</div><div style={{textAlign:"right"}}>Actions</div></div>{rows.map((t,i)=>{const st=tStatus(t.status);const ct=tCat(t.category);const p=tParse(t.components);const car=p.cards.length;const plain=tPlain(p.body);return(<div key={t.id||t.name+i} className="cs-row" style={{display:"grid",gridTemplateColumns:TPL_LIST_COLS,alignItems:"center",padding:"13px 18px",borderTop:`1px solid ${D.border}`}}><div onClick={()=>setViewTpl(t)} style={{minWidth:0,cursor:"pointer"}}><div title={t.name} style={{fontSize:13.5,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.name}</div></div><div><span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 9px",borderRadius:999,fontSize:11,fontWeight:700,background:st.bg,color:st.fg}}><span style={{width:6,height:6,borderRadius:"50%",background:st.dot}}/>{st.label}</span></div><div><span style={{padding:"2px 9px",borderRadius:7,fontSize:11,fontWeight:600,background:hexA(ct.c,.14),color:ct.c,border:`1px solid ${hexA(ct.c,.3)}`}}>{ct.label}</span></div><div style={{fontSize:11.5,color:D.faint,fontWeight:700,textTransform:"uppercase"}}>{t.language}</div><div onClick={()=>setViewTpl(t)} style={{minWidth:0,cursor:"pointer",display:"flex",alignItems:"center",gap:7}}>{p.header?.format&&p.header.format!=="text"&&<span style={{fontSize:12,flexShrink:0}}>{p.header.format==="image"?"🖼️":p.header.format==="video"?"🎬":"📄"}</span>}{car>0&&<span style={{fontSize:10.5,fontWeight:700,padding:"1px 7px",borderRadius:6,background:hexA(NC.list,.16),color:NC.list,flexShrink:0}}>🎠 {car}</span>}<span style={{fontSize:12.5,color:D.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{plain||<span style={{color:D.faint}}>No body</span>}</span></div><div style={{display:"flex",gap:7,justifyContent:"flex-end",alignItems:"center"}}><button onClick={()=>setViewTpl(t)} style={{...tBtnGhost,padding:"6px 13px"}}>Preview</button><button onClick={(e)=>{const r=e.currentTarget.getBoundingClientRect();setMenu(menu&&menu.id===(t.id||t.name)?null:{id:t.id||t.name,x:r.right,y:r.bottom,tpl:t});}} style={{width:30,height:30,border:`1px solid ${D.border}`,borderRadius:8,background:D.panel2,color:D.sub,cursor:"pointer",fontSize:16,lineHeight:"12px"}}>⋯</button></div></div>);})}</div>)}</div>{menu&&(()=>{const t=menu.tpl;return(<><div onClick={()=>setMenu(null)} style={{position:"fixed",inset:0,zIndex:90}}/><div style={{position:"fixed",top:menu.y+6,left:Math.max(12,menu.x-170),width:170,background:D.panel2,border:`1px solid ${D.border}`,borderRadius:11,boxShadow:"0 14px 34px rgba(0,0,0,.55)",zIndex:100,padding:5}}>{[["👁  Preview",()=>{setMenu(null);setViewTpl(t);}],["⧉  Duplicate",()=>dup(t)],["↻  Refresh",()=>{setMenu(null);load();}]].map(([l,fn])=><div key={l} className="cs-row" onClick={fn} style={{padding:"9px 11px",fontSize:12.5,cursor:"pointer",color:D.text,borderRadius:7}}>{l}</div>)}<div style={{height:1,background:D.border,margin:"5px 0"}}/><div className="cs-row" onClick={()=>{setMenu(null);setConfirmDel(t);}} style={{padding:"9px 11px",fontSize:12.5,cursor:"pointer",color:"#fb7185",borderRadius:7}}>🗑  Delete</div></div></>);})()}{viewTpl&&<PreviewModal tpl={viewTpl} onClose={()=>setViewTpl(null)} onDup={()=>{setViewTpl(null);dup(viewTpl);}} onDel={()=>{setViewTpl(null);setConfirmDel(viewTpl);}}/>}{confirmDel&&(<Mdl onClose={()=>setConfirmDel(null)} w={400}><div style={{fontWeight:700,fontSize:16.5,marginBottom:8}}>Delete "{confirmDel.name}"?</div><div style={{fontSize:13,color:D.sub,marginBottom:20,lineHeight:1.5}}>Removes the template from WhatsApp across all languages. Can't be undone.</div><div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><button onClick={()=>setConfirmDel(null)} style={btnGh()}>Cancel</button><button onClick={doDelete} style={{...btnGo(),background:"#dc2626"}}>Delete</button></div></Mdl>)}</div>);}
-
-function PreviewModal({tpl,onClose,onDup,onDel}){const p=tParse(tpl.components);const st=tStatus(tpl.status);const ct=tCat(tpl.category);return(<Mdl onClose={onClose} w={440}><div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:16}}><div style={{flex:1,minWidth:0}}><div style={{fontSize:17,fontWeight:700,wordBreak:"break-word"}}>{tpl.name}</div><div style={{display:"flex",gap:8,marginTop:7,flexWrap:"wrap"}}><span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 9px",borderRadius:999,fontSize:11,fontWeight:700,background:st.bg,color:st.fg}}><span style={{width:6,height:6,borderRadius:"50%",background:st.dot}}/>{st.label}</span><span style={{padding:"2px 9px",borderRadius:7,fontSize:11,fontWeight:600,background:hexA(ct.c,.14),color:ct.c}}>{ct.label}</span><span style={{fontSize:11,color:D.faint,fontWeight:700,textTransform:"uppercase",alignSelf:"center"}}>{tpl.language}</span></div></div><button onClick={onClose} style={{...btnSq(),width:32,height:32}}>✕</button></div>{tpl.rejected_reason&&String(tpl.status).toUpperCase()==="REJECTED"&&<div style={{marginBottom:14,padding:"9px 12px",borderRadius:9,background:hexA(NC.stop,.1),border:`1px solid ${hexA(NC.stop,.3)}`,color:"#fda4af",fontSize:12.5}}>Rejected: {String(tpl.rejected_reason).replace(/_/g," ").toLowerCase()}</div>}<Phone parts={p}/><div style={{display:"flex",gap:10,marginTop:18,justifyContent:"flex-end"}}><button onClick={onDel} style={{...btnGh(),color:"#fb7185",borderColor:hexA(NC.stop,.4)}}>Delete</button><button onClick={onDup} style={btnGo()}>⧉ Duplicate &amp; edit</button></div></Mdl>);}
-
-function Phone({parts,ex}){const{header,body,footer,buttons=[],cards=[]}=parts||{};const html=tMd(tFill(body,ex));const inlineBtns=buttons.filter((b)=>b.type==="URL"||b.type==="PHONE_NUMBER"||b.type==="COPY_CODE");const qrBtns=buttons.filter((b)=>b.type==="QUICK_REPLY");const isEmpty=!body&&!header&&buttons.length===0&&cards.length===0;return(<div style={{borderRadius:16,padding:12,background:"linear-gradient(160deg,#0b141a,#111b21)",border:`1px solid ${D.border}`}}><div style={{display:"flex",alignItems:"center",gap:9,padding:"8px 10px 10px"}}><div style={{width:30,height:30,borderRadius:"50%",background:"linear-gradient(135deg,#2a3942,#1f2c33)",display:"grid",placeItems:"center",fontSize:14,color:"#8696a0"}}>🏢</div><div style={{lineHeight:1.2}}><div style={{fontSize:12.5,fontWeight:600,color:"#e9edef"}}>Your Business</div><div style={{fontSize:10,color:"#8696a0"}}>online</div></div></div><div style={{borderRadius:12,padding:"16px 12px",background:"repeating-linear-gradient(135deg, rgba(255,255,255,.012) 0 2px, transparent 2px 22px), #0b141a",minHeight:90}}><div style={{maxWidth:300}}>{isEmpty?(<div style={{background:"#1f2c33",borderRadius:"0 8px 8px 8px",padding:"14px 13px"}}><div style={{fontSize:13,color:"#6b7c85",lineHeight:1.5,fontStyle:"italic"}}>Your message preview will appear here as you fill in the form.</div></div>):(<div style={{background:"#1f2c33",borderRadius:"0 8px 8px 8px",overflow:"hidden",boxShadow:"0 1px 1px rgba(0,0,0,.25)"}}>{header?.format&&["image","video","document"].includes(header.format)&&(<div style={{height:header.format==="document"?56:150,background:"linear-gradient(135deg,#10202a,#15303a)",display:"grid",placeItems:"center",color:"#5b7682",fontSize:header.format==="document"?22:34,position:"relative"}}>{header.url&&header.format==="image"?<img src={header.url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:header.url&&header.format==="video"?<video src={header.url} muted style={{width:"100%",height:"100%",objectFit:"cover"}}/>:(header.format==="image"?"🖼️":header.format==="video"?"🎬":"📄")}{header.format==="video"&&<div style={{position:"absolute",width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,.55)",display:"grid",placeItems:"center",color:"#fff",fontSize:18}}>▶</div>}</div>)}<div style={{padding:"7px 9px 8px"}}>{header?.format==="text"&&header.text&&<div style={{fontSize:14.5,fontWeight:700,color:"#e9edef",marginBottom:3,lineHeight:1.3}}>{tFill(header.text,ex)}</div>}<div style={{fontSize:14,color:"#e9edef",lineHeight:1.42,whiteSpace:"pre-wrap",wordBreak:"break-word"}} dangerouslySetInnerHTML={{__html:html||"<span style='color:#6b7c85'>Your message text…</span>"}}/>{footer&&<div style={{fontSize:12,color:"#8696a0",marginTop:5}}>{footer}</div>}<div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:3,marginTop:3}}><span style={{fontSize:10.5,color:"#8696a0"}}>11:30</span><span style={{fontSize:12,color:"#53bdeb"}}>✓✓</span></div></div>{inlineBtns.length>0&&<div style={{borderTop:"1px solid #2a3942"}}>{inlineBtns.map((b,i)=><div key={i} style={{padding:"9px 0",textAlign:"center",color:"#53bdeb",fontSize:14,fontWeight:500,borderTop:i===0?"none":"1px solid #2a3942",display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>{b.type==="URL"?"🔗":b.type==="PHONE_NUMBER"?"📞":"⧉"} {b.text||"Button"}</div>)}</div>}</div>)}{qrBtns.length>0&&<div style={{display:"flex",flexDirection:"column",gap:5,marginTop:5}}>{qrBtns.map((b,i)=><div key={i} style={{background:"#1f2c33",borderRadius:8,padding:"9px 0",textAlign:"center",color:"#53bdeb",fontSize:14,fontWeight:500,boxShadow:"0 1px 1px rgba(0,0,0,.25)"}}>{b.text||"Quick reply"}</div>)}</div>}{cards.length>0&&<div style={{display:"flex",gap:8,marginTop:8,overflowX:"auto",paddingBottom:4}}>{cards.map((card,i)=>{const cp=tParse(card.components);return(<div key={i} style={{flex:"0 0 180px",background:"#1f2c33",borderRadius:8,overflow:"hidden",boxShadow:"0 1px 1px rgba(0,0,0,.25)"}}><div style={{height:100,background:"linear-gradient(135deg,#10202a,#15303a)",display:"grid",placeItems:"center",color:"#5b7682",fontSize:26}}>{cp.header?.format==="video"?"🎬":"🖼️"}</div><div style={{padding:"7px 9px"}}><div style={{fontSize:12.5,color:"#e9edef",lineHeight:1.35,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden"}} dangerouslySetInnerHTML={{__html:tMd(cp.body)||"Card text"}}/>{cp.buttons.map((b,k)=><div key={k} style={{marginTop:6,paddingTop:6,borderTop:"1px solid #2a3942",textAlign:"center",color:"#53bdeb",fontSize:12.5,fontWeight:500}}>{b.type==="URL"?"🔗 ":b.type==="PHONE_NUMBER"?"📞 ":"↩ "}{b.text}</div>)}</div></div>);})}</div>}</div></div></div>);}
-
-function Builder({inbox,onClose,onDone,prefill}){const pf=prefill||{};const IID=inbox.id;const isMobile=useIsMobile();const[category,setCategory]=useState(pf.category||"MARKETING");const[language,setLanguage]=useState(pf.language||"en");const[name,setName]=useState(pf.name||"");const[hType,setHType]=useState(pf.header?.format||"none");const[hText,setHText]=useState(pf.header?.format==="text"?(pf.header.text||""):"");const[hHandle,setHHandle]=useState("");const[hName,setHName]=useState("");const[hUrl,setHUrl]=useState("");const[body,setBody]=useState(pf.body||"");const[footer,setFooter]=useState(pf.footer||"");const[buttons,setButtons]=useState(pf.buttons?pf.buttons.map((b)=>({type:b.type,text:b.text||"",url:b.url||"",phone_number:b.phone_number||""})):[]);const[cards,setCards]=useState(pf.cards?pf.cards.map((c)=>{const cp=tParse(c.components);return{header_type:cp.header?.format||"image",header_handle:"",header_name:"",body_text:cp.body||"",buttons:(cp.buttons||[]).map((b)=>({type:b.type,text:b.text||"",url:b.url||""}))};}): []);const[useCar,setUseCar]=useState((pf.cards||[]).length>0);const[vars,setVars]=useState([]);const[aSec,setASec]=useState(true);const[aExp,setAExp]=useState("");const[aBtn,setABtn]=useState("Copy Code");const[submitting,setSubmitting]=useState(false);const[error,setError]=useState("");const[uploading,setUploading]=useState(false);const fileRef=useRef(null);const bodyRef=useRef(null);const isAuth=category==="AUTHENTICATION";const isMedia=!isAuth&&["image","video","document"].includes(hType);const nV=tVars(body);useEffect(()=>{setVars((p)=>{const a=p.slice(0,nV);while(a.length<nV)a.push("");return a;});},[nV]);const wrap=(m)=>{const ta=bodyRef.current;if(!ta)return setBody((b)=>b+m+"text"+m);const s=ta.selectionStart,e=ta.selectionEnd,v=ta.value,sel=v.slice(s,e)||"text";setBody(v.slice(0,s)+m+sel+m+v.slice(e));requestAnimationFrame(()=>{ta.focus();ta.setSelectionRange(s+m.length,s+m.length+sel.length);});};const insVar=()=>{const ta=bodyRef.current,tok="{{" +(nV+1)+"}}";if(!ta)return setBody((b)=>b+tok);const s=ta.selectionStart,v=ta.value;setBody(v.slice(0,s)+tok+v.slice(s));requestAnimationFrame(()=>{ta.focus();ta.setSelectionRange(s+tok.length,s+tok.length);});};const upload=async(file,cb)=>{setUploading(true);setError("");try{const fd=new FormData();fd.append("file",file);fd.append("account_id",String(ACCOUNT_ID));fd.append("inbox_id",String(IID));const j=await(await fetch(`${API}/api/templates/upload-media`,{method:"POST",body:fd})).json();if(j.ok&&j.handle)cb(j.handle,file.name,URL.createObjectURL(file));else setError(j.error||"Media upload failed.");}catch{setError("Media upload failed.");}setUploading(false);};const nQR=buttons.filter((b)=>b.type==="QUICK_REPLY").length,nU=buttons.filter((b)=>b.type==="URL").length,nP=buttons.filter((b)=>b.type==="PHONE_NUMBER").length;const addBtnT=(type)=>{if(type==="QUICK_REPLY"&&nQR>=10)return;if(type==="URL"&&nU>=2)return;if(type==="PHONE_NUMBER"&&nP>=1)return;if(buttons.length>=10)return;setButtons((b)=>[...b,{type,text:"",url:"",phone_number:""}]);};const setB=(i,p)=>setButtons((b)=>b.map((x,j)=>(j===i?{...x,...p}:x)));const addCard=()=>{if(cards.length>=10)return;setCards((c)=>[...c,{header_type:c[0]?.header_type||"image",header_handle:"",header_name:"",body_text:"",buttons:[]}]);};const setCard=(i,p)=>setCards((c)=>c.map((x,j)=>(j===i?{...x,...p}:x)));const validate=()=>{if(!/^[a-z0-9_]+$/.test(name))return"Name must be lowercase letters, numbers and underscores only.";if(!isAuth&&!useCar&&!body.trim())return"Body text is required.";if(isMedia&&!hHandle)return`Upload a sample ${hType} for the header.`;for(const b of buttons){if(!b.text.trim())return"Every button needs a label.";if(b.type==="URL"&&!b.url.trim())return"URL buttons need a link.";if(b.type==="PHONE_NUMBER"&&!b.phone_number.trim())return"Call buttons need a number.";}if(useCar){if(cards.length<2)return"A carousel needs at least 2 cards.";for(const c of cards){if(!c.body_text.trim())return"Every card needs text.";if(!c.header_handle)return"Every card needs a sample media upload.";for(const b of(c.buttons||[]))if(!b.text.trim())return"Every card button needs a label.";}}return"";};const submit=async()=>{const v=validate();if(v){setError(v);window.scrollTo({top:0,behavior:"smooth"});return;}setSubmitting(true);setError("");const exOk=vars.filter((x)=>x.trim()).length===nV&&nV>0;const payload={account_id:ACCOUNT_ID,inbox_id:IID,name,language,category,header_type:isAuth?"none":hType,header_text:hText,header_handle:hHandle||undefined,body_text:body,footer_text:footer,buttons:isAuth?[]:buttons,body_example:exOk?vars:undefined,add_security_recommendation:aSec,code_expiration_minutes:aExp?parseInt(aExp,10):undefined,button_text:aBtn,cards:useCar?cards.map((c)=>({header_type:c.header_type,header_handle:c.header_handle||undefined,body_text:c.body_text,buttons:c.buttons})):undefined};try{const j=await(await fetch(`${API}/api/templates`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})).json();if(j.ok)onDone();else{setError(j.error||"Couldn't submit. Check the fields and try again.");window.scrollTo({top:0,behavior:"smooth"});}}catch{setError("Couldn't reach the server.");}setSubmitting(false);};const prev=isAuth?{body:(body||"{{1}} is your verification code.").replace(/\{\{1\}\}/,"123456"),footer:aSec?"For your security, do not share this code.":"",buttons:[{type:"COPY_CODE",text:aBtn||"Copy Code"}]}:{header:hType!=="none"?{format:hType,text:hText,url:hUrl}:null,body,footer,buttons,cards:useCar?cards.map((c)=>({components:[{type:"HEADER",format:c.header_type},{type:"BODY",text:c.body_text},...(c.buttons.length?[{type:"BUTTONS",buttons:c.buttons}]:[])]})):[]};
-return(<div style={{minHeight:"100vh",background:D.bg,fontFamily:T.font,color:D.text}}><div style={{position:"sticky",top:0,zIndex:20,background:D.panel,borderBottom:`1px solid ${D.border}`}}><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"11px 16px":"13px 24px",display:"flex",alignItems:"center",gap:isMobile?10:14,flexWrap:"wrap"}}><button onClick={onClose} style={btnGh()}>←{isMobile?"":" Back"}</button><div style={{minWidth:0}}><div style={{fontSize:15.5,fontWeight:700}}>{pf.name?"Duplicate template":"New template"}</div><div style={{fontSize:11.5,color:D.faint,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inbox.name}</div></div><div style={{marginLeft:"auto"}}><button onClick={submit} disabled={submitting||uploading} className="cs-pub" style={{...btnGo(),opacity:submitting||uploading?.6:1}}>{submitting?"Submitting…":isMobile?"Submit":"Submit for review"}</button></div></div></div><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"16px 16px 60px":"20px 24px 60px"}}>{error&&<Bnr kind="err" onX={()=>setError("")}>{error}</Bnr>}<div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"minmax(0,1fr) 360px",gap:isMobile?18:28,alignItems:"start"}}><div style={{display:"flex",flexDirection:"column",gap:18,order:isMobile?2:1}}><Crd title="Setup" icon="⚙️"><Fld label="Category"><div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:9}}>{TPL_CATS.map(([v,l,sub,ic])=>{const on=category===v;const cm=tCat(v);return(<div key={v} onClick={()=>setCategory(v)} style={{cursor:"pointer",padding:"12px 11px",borderRadius:10,border:`1.5px solid ${on?cm.c:D.border}`,background:on?hexA(cm.c,.1):D.panel2,display:isMobile?"flex":"block",alignItems:"center",gap:11}}><div style={{fontSize:18,marginBottom:isMobile?0:5}}>{ic}</div><div style={{minWidth:0}}><div style={{fontSize:13,fontWeight:700,color:on?cm.c:D.text}}>{l}</div><div style={{fontSize:10.5,color:D.faint,marginTop:2,lineHeight:1.3}}>{sub}</div></div></div>);})}</div></Fld><div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12}}><Fld label="Language"><Slc value={language} onChange={setLanguage} options={TPL_LANGS2}/></Fld><Fld label="Template name"><Inp value={name} onChange={(v)=>setName(v.toLowerCase().replace(/[^a-z0-9_]/g,"_"))} ph="order_confirmation"/></Fld></div><Hnt>Name is permanent: lowercase, numbers &amp; underscores.</Hnt></Crd>{isAuth?(<Crd title="Authentication content" icon="🔐"><div style={{fontSize:12.5,color:D.sub,lineHeight:1.55,marginBottom:14,padding:"10px 12px",background:hexA(NC.list,.08),border:`1px solid ${hexA(NC.list,.25)}`,borderRadius:10}}>WhatsApp inserts the code and copy button automatically.</div><Tgl on={aSec} onClick={()=>setASec(!aSec)} label='Add the security line ("do not share this code")'/><div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginTop:12}}><Fld label="Code expiry (min, optional)"><Inp value={aExp} onChange={(v)=>setAExp(v.replace(/[^0-9]/g,""))} ph="10"/></Fld><Fld label="Copy button text"><Inp value={aBtn} maxLength={25} onChange={setABtn} ph="Copy Code"/></Fld></div></Crd>):(<>{!useCar&&(<Crd title="Content" icon="✍️"><Fld label="Header (optional)"><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{TPL_HDRS.map(([v,l,ic])=>{const on=hType===v;return<div key={v} onClick={()=>{setHType(v);setHHandle("");setHName("");setHUrl("");}} style={{cursor:"pointer",display:"flex",alignItems:"center",gap:6,padding:"8px 13px",borderRadius:8,fontSize:12.5,fontWeight:600,border:`1.5px solid ${on?ACCENT:D.border}`,background:on?hexA(ACCENT,.13):D.panel2,color:on?"#bdd4ff":D.sub}}><span>{ic}</span>{l}</div>;})}</div>{hType==="text"&&<div style={{marginTop:9}}><Inp value={hText} maxLength={60} onChange={setHText} ph="Header text (max 60)"/></div>}{isMedia&&<div style={{marginTop:9}}><input ref={fileRef} type="file" accept={hType==="image"?"image/*":hType==="video"?"video/*":"application/pdf"} onChange={(e)=>{const f=e.target.files?.[0];e.target.value="";if(f)upload(f,(h,nm,u)=>{setHHandle(h);setHName(nm);setHUrl(u);});}} style={{display:"none"}}/><button onClick={()=>fileRef.current?.click()} disabled={uploading} style={dash(NC.media)}>{uploading?"Uploading…":hHandle?`✓ ${hName} — change`:`📎 Upload sample ${hType}`}</button><Hnt>One sample {hType} is needed for approval.</Hnt></div>}</Fld><Fld label={`Body${nV?` · ${nV} variable${nV>1?"s":""}`:""}` }><div style={{display:"flex",gap:4,marginBottom:7,alignItems:"center",flexWrap:"wrap"}}>{[["B","*",{fontWeight:800}],["I","_",{fontStyle:"italic"}],["S","~",{textDecoration:"line-through"}],["</>","```",{fontFamily:"monospace",fontSize:11}]].map(([lb,m,st])=><button key={m} onClick={()=>wrap(m)} style={{minWidth:30,height:28,borderRadius:7,border:`1px solid ${D.border}`,background:D.panel2,color:D.text,cursor:"pointer",fontSize:12.5,...st}}>{lb}</button>)}<div style={{width:1,height:18,background:D.border,margin:"0 4px"}}/><button onClick={insVar} style={{height:28,padding:"0 11px",borderRadius:7,border:`1px solid ${hexA(ACCENT,.5)}`,background:hexA(ACCENT,.12),color:"#bdd4ff",cursor:"pointer",fontSize:12,fontWeight:600}}>{"{ }"} Variable</button><span style={{marginLeft:"auto",fontSize:11,color:D.faint}}>{body.length}/1024</span></div><textarea ref={bodyRef} className="cs-in" value={body} maxLength={1024} onChange={(e)=>setBody(e.target.value)} rows={5} placeholder="Hi {{1}}, your order {{2}} is confirmed! 🎉" style={{width:"100%",padding:"10px 12px",borderRadius:8,fontSize:13.5,boxSizing:"border-box",resize:"vertical",fontFamily:T.font,lineHeight:1.5}}/><Hnt>Select text then tap B/I/S to format. Variable = values you fill at send time.</Hnt></Fld>{nV>0&&<Fld label="Sample values (for review)"><div style={{display:"flex",flexDirection:"column",gap:7}}>{Array.from({length:nV}).map((_,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:9}}><span style={{fontSize:11.5,fontWeight:700,color:ACCENT,fontFamily:"monospace",minWidth:34}}>{"{{" +(i+1)+"}}"}</span><div style={{flex:1}}><Inp value={vars[i]||""} onChange={(v)=>setVars((a)=>{const c=[...a];c[i]=v;return c;})} ph={i===0?"e.g. Ali":"e.g. #12345"}/></div></div>)}</div></Fld>}<Fld label="Footer (optional)"><Inp value={footer} maxLength={60} onChange={setFooter} ph="e.g. Reply STOP to unsubscribe"/></Fld></Crd>)}{!useCar&&(<Crd title="Buttons" icon="🔘" right={<span style={{fontSize:11,color:D.faint}}>{buttons.length}/10</span>}><div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:buttons.length?12:0}}><button onClick={()=>addBtnT("QUICK_REPLY")} disabled={nQR>=10} style={pill(nQR>=10)}>↩ Quick reply <span style={{color:D.faint}}>{nQR}/10</span></button><button onClick={()=>addBtnT("URL")} disabled={nU>=2} style={pill(nU>=2)}>🔗 Visit website <span style={{color:D.faint}}>{nU}/2</span></button><button onClick={()=>addBtnT("PHONE_NUMBER")} disabled={nP>=1} style={pill(nP>=1)}>📞 Call <span style={{color:D.faint}}>{nP}/1</span></button></div>{buttons.map((b,i)=>(<div key={i} style={{border:`1px solid ${D.border}`,borderRadius:10,padding:10,marginBottom:9,background:D.panel2}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><span style={{fontSize:10.5,fontWeight:700,textTransform:"uppercase",color:b.type==="URL"?"#9ec1ff":b.type==="PHONE_NUMBER"?NC.buttons:NC.list}}>{b.type==="QUICK_REPLY"?"↩ Quick reply":b.type==="URL"?"🔗 Website":"📞 Call"}</span><button onClick={()=>setButtons((bs)=>bs.filter((_,j)=>j!==i))} style={{...xMini(),marginLeft:"auto"}}>✕</button></div><Inp value={b.text} maxLength={25} onChange={(v)=>setB(i,{text:v})} ph="Button text (max 25)"/>{b.type==="URL"&&<div style={{marginTop:7}}><Inp value={b.url} onChange={(v)=>setB(i,{url:v})} ph="https://example.com/{{1}}"/></div>}{b.type==="PHONE_NUMBER"&&<div style={{marginTop:7}}><Inp value={b.phone_number} onChange={(v)=>setB(i,{phone_number:v})} ph="+92300xxxxxxx"/></div>}</div>))}<Hnt>Up to 10 quick replies, 2 website buttons and 1 call button.</Hnt></Crd>)}<Crd title="Carousel" icon="🎠" right={<Tgl on={useCar} onClick={()=>setUseCar(!useCar)} label="" small/>}>{!useCar?<div style={{fontSize:12.5,color:D.sub,lineHeight:1.55}}>Turn on to send 2–10 swipeable cards, each with its own image/video, text and buttons.</div>:(<><div style={{fontSize:12,color:D.sub,lineHeight:1.5,marginBottom:12,padding:"9px 11px",background:hexA(NC.list,.07),border:`1px solid ${hexA(NC.list,.22)}`,borderRadius:9}}>Every card must use the same media type and button layout.</div>{cards.map((c,i)=>(<div key={i} style={{border:`1px solid ${D.border}`,borderRadius:11,padding:12,marginBottom:11,background:D.panel2}}><div style={{display:"flex",alignItems:"center",marginBottom:10}}><span style={{fontSize:12,fontWeight:700,color:NC.list}}>Card {i+1}</span><button onClick={()=>setCards((cc)=>cc.filter((_,j)=>j!==i))} style={{...xMini(),marginLeft:"auto"}}>✕ Remove</button></div><Fld label="Card media" tight><div style={{display:"flex",gap:7,marginBottom:8}}>{[["image","Image","🖼️"],["video","Video","🎬"]].map(([v,l,ic])=>{const on=c.header_type===v;return<div key={v} onClick={()=>setCard(i,{header_type:v,header_handle:"",header_name:""})} style={{cursor:"pointer",display:"flex",alignItems:"center",gap:5,padding:"6px 11px",borderRadius:8,fontSize:12,fontWeight:600,border:`1px solid ${on?NC.list:D.border}`,background:on?hexA(NC.list,.13):D.input,color:on?NC.list:D.sub}}><span>{ic}</span>{l}</div>;})} </div><CardUp card={c} onUp={(file)=>upload(file,(h,nm)=>setCard(i,{header_handle:h,header_name:nm}))} uploading={uploading}/></Fld><Fld label="Card text" tight><textarea className="cs-in" value={c.body_text} maxLength={160} onChange={(e)=>setCard(i,{body_text:e.target.value})} rows={2} placeholder="Card description (max 160)" style={{width:"100%",padding:"9px 11px",borderRadius:8,fontSize:13,boxSizing:"border-box",resize:"vertical",fontFamily:T.font}}/></Fld><CardBtns card={c} onChange={(b)=>setCard(i,{buttons:b})}/></div>))}{cards.length<10&&<button onClick={addCard} style={dash(NC.list)}>＋ Add card {cards.length?`(${cards.length}/10)`:""}</button>}{cards.length<2&&<Hnt>A carousel needs at least 2 cards.</Hnt>}</>)}</Crd></>)}</div><div style={{position:isMobile?"static":"sticky",top:78,order:isMobile?1:2}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:11}}><span style={{fontSize:11,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:D.faint}}>Live preview</span><span style={{fontSize:10.5,color:D.faint,marginLeft:"auto"}}>Updates as you type</span></div><Phone parts={prev} ex={vars}/><div style={{marginTop:12,padding:"11px 13px",background:D.panel2,border:`1px solid ${D.border}`,borderRadius:11,fontSize:11.5,color:D.sub,lineHeight:1.55}}><b style={{color:D.text}}>Approval:</b> after submit, WhatsApp reviews (minutes–24h). You'll see <span style={{color:"#fbbf24"}}>In review</span> → <span style={{color:"#34d399"}}>Approved</span> or <span style={{color:"#fb7185"}}>Rejected</span>.</div></div></div></div></div>);}
-
-function CardUp({card,onUp,uploading}){const ref=useRef(null);return(<><input ref={ref} type="file" accept={card.header_type==="video"?"video/*":"image/*"} onChange={(e)=>{const f=e.target.files?.[0];e.target.value="";if(f)onUp(f);}} style={{display:"none"}}/><button onClick={()=>ref.current?.click()} disabled={uploading} style={dash(NC.list)}>{card.header_handle?`✓ ${card.header_name||"Uploaded"} — change`:`📎 Upload ${card.header_type}`}</button></>);}
-function CardBtns({card,onChange}){const b=card.buttons||[];const add=(type)=>{if(b.length>=2)return;onChange([...b,{type,text:"",url:""}]);};const set=(i,p)=>onChange(b.map((x,j)=>(j===i?{...x,...p}:x)));return(<Fld label="Card buttons (optional, max 2)" tight><div style={{display:"flex",gap:7,marginBottom:b.length?8:0}}><button onClick={()=>add("QUICK_REPLY")} disabled={b.length>=2} style={pill(b.length>=2)}>↩ Quick reply</button><button onClick={()=>add("URL")} disabled={b.length>=2} style={pill(b.length>=2)}>🔗 Website</button></div>{b.map((bt,i)=><div key={i} style={{border:`1px solid ${D.border}`,borderRadius:8,padding:8,marginBottom:7,background:D.input}}><div style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}><span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:bt.type==="URL"?"#9ec1ff":NC.list}}>{bt.type==="URL"?"🔗 Website":"↩ Quick reply"}</span><button onClick={()=>onChange(b.filter((_,j)=>j!==i))} style={{...xMini(),marginLeft:"auto"}}>✕</button></div><Inp value={bt.text} maxLength={25} onChange={(v)=>set(i,{text:v})} ph="Button text"/>{bt.type==="URL"&&<div style={{marginTop:6}}><Inp value={bt.url} onChange={(v)=>set(i,{url:v})} ph="https://…"/></div>}</div>)}</Fld>);}
-
-function Empty({icon,title,sub,action}){return(<div style={{border:`1px dashed ${D.border}`,borderRadius:14,padding:"56px 24px",textAlign:"center",background:D.card}}><div style={{width:60,height:60,margin:"0 auto 16px",borderRadius:14,background:D.panel2,border:`1px solid ${D.border}`,display:"grid",placeItems:"center",fontSize:28}}>{icon}</div><div style={{fontSize:16,fontWeight:700,marginBottom:5}}>{title}</div><div style={{fontSize:13,color:D.sub,marginBottom:action?20:0}}>{sub}</div>{action}</div>);}
-function Crd({title,icon,right,children}){return(<div style={{background:D.card,border:`1px solid ${D.border}`,borderRadius:12,overflow:"hidden"}}><div style={{display:"flex",alignItems:"center",gap:9,padding:"13px 16px",borderBottom:`1px solid ${D.border}`}}><span style={{fontSize:15}}>{icon}</span><span style={{fontSize:13.5,fontWeight:700,letterSpacing:"-.01em"}}>{title}</span><div style={{marginLeft:"auto"}}>{right}</div></div><div style={{padding:16}}>{children}</div></div>);}
-function Fld({label,children,tight}){return(<div style={{marginBottom:tight?10:16}}><div style={{fontSize:12,fontWeight:600,color:D.sub,marginBottom:7}}>{label}</div>{children}</div>);}
-function Hnt({children}){return<div style={{fontSize:11,color:D.faint,marginTop:8,lineHeight:1.5}}>{children}</div>;}
-function Bnr({kind,children,onX}){const ok=kind==="ok";return(<div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:16,padding:"11px 14px",borderRadius:11,background:ok?hexA(NC.buttons,.1):hexA(NC.stop,.1),border:`1px solid ${ok?hexA(NC.buttons,.35):hexA(NC.stop,.35)}`,color:ok?"#4ade80":"#fda4af",fontSize:13}}><span style={{flex:1,lineHeight:1.5}}>{children}</span>{onX&&<button onClick={onX} style={{background:"transparent",border:"none",color:"inherit",cursor:"pointer",fontSize:14,opacity:.7}}>✕</button>}</div>);}
-function Mdl({children,onClose,w}){return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.66)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16}}><div onClick={(e)=>e.stopPropagation()} style={{width:w||420,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto",background:D.panel,border:`1px solid ${D.border}`,borderRadius:14,padding:22,fontFamily:T.font,boxShadow:"0 24px 60px rgba(0,0,0,.6)"}}>{children}</div></div>);}
-function Tgl({on,onClick,label,small}){return(<div onClick={onClick} style={{display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}><div style={{width:small?38:40,height:small?22:23,borderRadius:999,background:on?NC.buttons:"#3a4456",position:"relative",transition:"background .15s",flexShrink:0}}><div style={{position:"absolute",top:2,left:on?(small?18:19):2,width:small?18:19,height:small?18:19,borderRadius:"50%",background:"#fff",transition:"left .15s",boxShadow:"0 1px 3px rgba(0,0,0,.4)"}}/></div>{label&&<span style={{fontSize:12.5,color:D.text,lineHeight:1.4}}>{label}</span>}</div>);}
-function Inp({value,onChange,ph,maxLength}){return(<input className="cs-in" value={value} placeholder={ph} maxLength={maxLength} onChange={(e)=>onChange(e.target.value)} style={{width:"100%",padding:"9px 11px",borderRadius:8,fontSize:13,boxSizing:"border-box",fontFamily:T.font}}/>);}
-function Slc({value,onChange,options}){return(<select className="cs-in" value={value} onChange={(e)=>onChange(e.target.value)} style={{width:"100%",padding:"9px 11px",borderRadius:8,fontSize:13,boxSizing:"border-box",fontFamily:T.font,cursor:"pointer"}}>{options.map(([v,l])=><option key={v} value={v} style={{background:D.panel2}}>{l}</option>)}</select>);}
-const btnGo=()=>({display:"inline-flex",alignItems:"center",gap:5,padding:"9px 17px",background:"#16A34A",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:T.font});
-const btnGh=()=>({padding:"8px 15px",borderRadius:8,cursor:"pointer",fontSize:13,fontFamily:T.font,fontWeight:600,border:`1px solid ${D.border}`,background:D.panel2,color:D.text});
-const btnSq=()=>({width:36,height:36,borderRadius:8,border:`1px solid ${D.border}`,background:D.panel2,color:D.sub,cursor:"pointer",fontSize:15,fontFamily:T.font});
-const dash=(c)=>({width:"100%",padding:"10px 12px",border:`1.5px dashed ${hexA(c,.6)}`,color:c,background:hexA(c,.07),borderRadius:8,cursor:"pointer",fontFamily:T.font,fontSize:12.5,fontWeight:600});
-const pill=(dis)=>({display:"inline-flex",alignItems:"center",gap:6,padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,fontFamily:T.font,border:`1px solid ${D.border}`,background:dis?"transparent":D.panel2,color:dis?D.faint:D.text,cursor:dis?"default":"pointer",opacity:dis?.5:1});
-const xMini=()=>({border:`1px solid ${hexA(NC.stop,.45)}`,color:"#fb7185",background:"transparent",borderRadius:6,cursor:"pointer",padding:"3px 9px",fontFamily:T.font,fontSize:11.5,fontWeight:600});
+start().catch((e) => { console.error("Startup error:", e.message); process.exit(1); });
