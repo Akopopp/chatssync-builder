@@ -511,6 +511,29 @@ function defaultData(kind) {
   return {};
 }
 
+const HELP = {
+  text: "Sends a plain message. Use {name} or other saved answers inside the text. Connect it to the next box.",
+  buttons: "Sends a message with up to 3 buttons. Join each button to the box that should come next when the customer taps it.",
+  list: "Sends a menu with up to 10 rows. Good for services or price lists. Join each row to its own next box.",
+  media: "Sends a picture, video or PDF with an optional caption.",
+  cta: "Sends a message with one link button, like your website or a payment page.",
+  question: "Asks something and waits for the reply. Pick what you expect (name, phone, email, number) and save it, then use it later as {saved name}.",
+  form: "Opens a WhatsApp form so the customer fills several details at once. Make the form first in Settings > WhatsApp forms.",
+  catalog: "Shows your products from Catalog so the customer can pick and order inside the chat.",
+  appointment: "Shows free times and books an appointment. Set your days and hours first in Settings > Appointments.",
+  delay: "Waits a few seconds or minutes before the next box, so messages feel natural.",
+  condition: "Splits the flow: if a saved answer or tag matches, go one way; if not, the other.",
+  tag: "Adds or removes a label on the chat, like interested or vip. Your team can filter chats by it.",
+  stop: "Ends the chatbot and hands the chat to your team. Add a message like \"Our team will reply soon\".",
+  start: "The flow starts here. Leave keywords empty to start on any message, or add words like hi or price to start only on them.",
+};
+
+const PAGE_HELP = {
+  "flows": "A chatbot is a flow of boxes that replies on WhatsApp by itself. Click New chatbot, add boxes, join them and press Publish, then pick the number it runs on. If the AI agent is on with flows, it can also send your flow boxes.",
+  "gallery": "Upload pictures, videos, audio and PDFs once, then pick them in Send Media boxes, product cards and templates.",
+  "templates": "WhatsApp needs an approved template to start a chat or send a campaign after 24 hours. Pick a number, create a template and send it for review; Meta usually replies within minutes to a day."
+};
+
 const PALETTE = [
   { group: "Messages", items: [
     { kind: "text", label: "Send Text", icon: "💬", color: NC.text },
@@ -647,7 +670,7 @@ function Dashboard({ onEdit }) {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.font, color: T.text }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: isMobile ? "18px 16px 12px" : "24px 28px 12px", gap: 12, flexWrap: "wrap" }}>
-        <div><div style={{ fontSize: isMobile ? 19 : 22, fontWeight: 700 }}>Chatbots</div><div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Manage your chatbots</div></div>
+        <div><div style={{ fontSize: isMobile ? 19 : 22, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>Chatbots<Tip push={false} text={PAGE_HELP.flows} /></div><div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Manage your chatbots</div></div>
         <div style={{ display: "flex", gap: 10 }}>
           <input ref={fileRef} type="file" accept="application/json" onChange={importBot} style={{ display: "none" }} />
           <button style={btnGhost} onClick={() => fileRef.current?.click()}>⬆ Import</button>
@@ -773,7 +796,7 @@ function Gallery() {
     <div style={{ minHeight: "100vh", background: D.bg, fontFamily: T.font, color: D.text }}>
       <div style={{ position: "sticky", top: 0, zIndex: 10, background: D.panel, borderBottom: `1px solid ${D.border}`, padding: "16px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: D.text }}>Media Gallery</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: D.text, display: "flex", alignItems: "center", gap: 8 }}>Media Gallery<Tip push={false} text={PAGE_HELP.gallery} /></div>
           <div style={{ fontSize: 12.5, color: D.sub, marginTop: 2 }}>Images, videos, audio &amp; documents to use in your chatbots</div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
@@ -1000,6 +1023,7 @@ function Editor({ flowId, onBack }) {
                   <button key={p.kind} className="cs-pal" draggable onDragStart={(e) => { e.dataTransfer.setData("application/cs-node", p.kind); e.dataTransfer.effectAllowed = "move"; }} onClick={() => addNode(p.kind)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", marginBottom: 7, padding: "10px 11px", border: `1px solid ${D.border}`, borderRadius: 9, background: D.panel2, color: D.text, cursor: "pointer", fontSize: 12.5, fontWeight: 500, fontFamily: T.font, transition: "all .12s" }}>
                     <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: hexA(p.color, .14), color: p.color, fontSize: 12 }}>{p.icon}</span>
                     {p.label}
+                    <Tip text={HELP[p.kind]} />
                   </button>
                 ))}
               </div>
@@ -1022,6 +1046,7 @@ function Editor({ flowId, onBack }) {
           <div style={panelStyle}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 14, ...(isMobile ? { position: "sticky", top: 0, background: D.panel, paddingBottom: 10, marginTop: -4, paddingTop: 4, zIndex: 5, borderBottom: `1px solid ${D.border}` } : {}) }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: D.faint, textTransform: "uppercase", letterSpacing: ".06em" }}>Edit node</div>
+              {HELP[selected.type] && <span style={{ marginLeft: 8, display: "flex" }}><Tip text={HELP[selected.type]} /></span>}
               <button onClick={() => { reopenGuard.current = true; setSelectedId(null); setNodes((nds) => nds.map((n) => ({ ...n, selected: false }))); setTimeout(() => { reopenGuard.current = false; }, 300); }} title="Close" style={{ marginLeft: "auto", width: isMobile ? 38 : 30, height: isMobile ? 38 : 30, borderRadius: 8, border: `1px solid ${D.border}`, background: D.panel2, color: D.sub, cursor: "pointer", fontSize: isMobile ? 17 : 14, flexShrink: 0, display: "grid", placeItems: "center" }}>✕</button>
             </div>
 
@@ -1217,6 +1242,27 @@ function HeaderField({ header, setHeader, openPicker }) {
     {(h.type === "image" || h.type === "video" || h.type === "document") && (<><div style={{ height: 6 }} /><button onClick={openPicker} style={addBtn(NC.media)}>📁 Choose header media</button><In value={h.value} onChange={(v) => setHeader({ type: h.type, value: v })} placeholder="https://… or pick from gallery" /></>)}
   </>);
 }
+// The small "?" — hover, tap or tab to it to read what a box does.
+function Tip({ text, push = true }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  const show = () => {
+    const r = ref.current.getBoundingClientRect();
+    const below = r.bottom + 140 < window.innerHeight;
+    setPos({ x: Math.max(8, Math.min(r.right - 250, window.innerWidth - 258)), y: below ? r.bottom + 6 : r.top - 6, below });
+  };
+  const hide = () => setPos(null);
+  return (
+    <span ref={ref} role="button" tabIndex={0} aria-label={text} draggable={false}
+      onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}
+      onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); e.preventDefault(); pos ? hide() : show(); }}
+      style={{ marginLeft: push ? "auto" : 0, width: 18, height: 18, borderRadius: 999, display: "grid", placeItems: "center", border: `1px solid ${D.border}`, color: D.sub, fontSize: 11, fontWeight: 700, cursor: "help", flexShrink: 0 }}>
+      ?
+      {pos && <span style={{ position: "fixed", left: pos.x, top: pos.y, transform: pos.below ? "none" : "translateY(-100%)", width: 250, zIndex: 9999, padding: "9px 11px", borderRadius: 9, background: "#0b141a", color: "#e9edef", border: "1px solid #223039", fontSize: 11.5, fontWeight: 400, lineHeight: 1.5, textAlign: "left", textTransform: "none", letterSpacing: 0, boxShadow: "0 10px 30px rgba(0,0,0,.35)", whiteSpace: "normal", pointerEvents: "none" }}>{text}</span>}
+    </span>
+  );
+}
+
 function Ed({ title, children }) { return (<div><div style={{ fontWeight: 700, marginBottom: 12, color: D.text, fontSize: 14 }}>{title}</div>{children}</div>); }
 function Lb({ children }) { return <div style={{ fontSize: 12, fontWeight: 600, color: D.sub, margin: "10px 0 4px" }}>{children}</div>; }
 function Hn({ children }) { return <div style={{ fontSize: 11, color: D.faint, marginTop: 8, lineHeight: 1.5 }}>{children}</div>; }
@@ -1274,7 +1320,7 @@ const tBtnIcon={width:36,height:36,borderRadius:8,border:`1px solid ${D.border}`
 function Crumb({items}){return(<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,marginBottom:12,flexWrap:"wrap"}}>{items.map((it,i)=>(<span key={i} style={{display:"inline-flex",alignItems:"center",gap:7}}>{i>0&&<span style={{color:D.faint,opacity:.6}}>›</span>}<span onClick={it.onClick} style={{cursor:it.onClick?"pointer":"default",color:it.active?D.sub:D.faint,fontWeight:it.active?600:500}}>{it.label}</span></span>))}</div>);}
 function CopyCell({value,mono}){const[done,setDone]=useState(false);if(!value)return<span style={{color:D.faint,fontSize:12.5}}>—</span>;const show=String(value).length>20?String(value).slice(0,9)+"…"+String(value).slice(-7):String(value);return(<div style={{display:"inline-flex",alignItems:"center",gap:7,maxWidth:"100%",minWidth:0}}><span title={String(value)} style={{fontSize:12.5,color:D.text,fontFamily:mono?"monospace":T.font,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{show}</span><button onClick={()=>{if(copyText(String(value))){setDone(true);setTimeout(()=>setDone(false),1200);}}} title="Copy" style={{flexShrink:0,width:24,height:24,borderRadius:6,border:`1px solid ${D.border}`,background:done?hexA(NC.buttons,.16):D.panel2,color:done?"#4ade80":D.sub,cursor:"pointer",fontSize:11,display:"grid",placeItems:"center"}}>{done?"✓":"⧉"}</button></div>);}
 
-function Templates(){const[inboxes,setInboxes]=useState(null);const[picked,setPicked]=useState(null);const[err,setErr]=useState("");const[syncKey,setSyncKey]=useState(0);const isMobile=useIsMobile();const loadInboxes=async()=>{setErr("");try{const j=await(await fetch(`${API}/api/inboxes?account_id=${ACCOUNT_ID}`)).json();const wa=(j.inboxes||[]).filter((i)=>(i.channel_type||"").toLowerCase().includes("whatsapp"));setInboxes(wa.length?wa:(j.inboxes||[]));}catch{setInboxes([]);setErr("Couldn't load your WhatsApp numbers.");}};useEffect(()=>{loadInboxes();},[]);if(picked)return<TemplatesList inbox={picked} onBack={()=>setPicked(null)}/>;return(<div style={{minHeight:"100vh",background:D.bg,fontFamily:T.font,color:D.text}}><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"18px 16px 44px":"22px 24px 50px"}}><Crumb items={[{label:"Dashboard"},{label:"Manage"},{label:"WhatsApp Templates",active:true}]}/><div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:18,flexWrap:"wrap"}}><div><div style={{fontSize:isMobile?19:22,fontWeight:700,letterSpacing:"-.01em"}}>WhatsApp Templates</div><div style={{fontSize:13,color:D.sub,marginTop:3}}>Manage message templates for each of your numbers</div></div><button className="cs-pub" onClick={()=>{setInboxes(null);setSyncKey((k)=>k+1);loadInboxes();}} style={tBtnGhost}>↻ Sync Numbers</button></div>{err&&<Bnr kind="err" onX={()=>setErr("")}>{err}</Bnr>}{inboxes===null&&<div style={{color:D.sub,fontSize:13,padding:40,textAlign:"center",border:`1px solid ${D.border}`,borderRadius:12,background:D.card}}>Loading numbers…</div>}{inboxes&&inboxes.length===0&&<Empty icon="📞" title="No WhatsApp numbers found" sub="Connect a WhatsApp Cloud number in ChatsSync first, then come back to create templates."/>}{inboxes&&inboxes.length>0&&(isMobile?(<div style={{display:"flex",flexDirection:"column",gap:12}}>{inboxes.map((ib)=><NumberRow key={ib.id} inbox={ib} syncKey={syncKey} isMobile onManage={()=>setPicked(ib)}/>)}</div>):(<div style={{border:`1px solid ${D.border}`,borderRadius:12,overflow:"hidden",background:D.card}}><div style={{display:"grid",gridTemplateColumns:TPL_NUM_COLS,padding:"11px 18px",background:D.panel2,fontSize:11.5,fontWeight:700,color:D.sub,textTransform:"uppercase",letterSpacing:".04em"}}><div>Verified Name</div><div>Business App</div><div>Phone Number</div><div>WABA ID</div><div style={{textAlign:"center"}}>Templates</div><div style={{textAlign:"right"}}>Actions</div></div>{inboxes.map((ib)=><NumberRow key={ib.id} inbox={ib} syncKey={syncKey} onManage={()=>setPicked(ib)}/>)}</div>))}</div></div>);}
+function Templates(){const[inboxes,setInboxes]=useState(null);const[picked,setPicked]=useState(null);const[err,setErr]=useState("");const[syncKey,setSyncKey]=useState(0);const isMobile=useIsMobile();const loadInboxes=async()=>{setErr("");try{const j=await(await fetch(`${API}/api/inboxes?account_id=${ACCOUNT_ID}`)).json();const wa=(j.inboxes||[]).filter((i)=>(i.channel_type||"").toLowerCase().includes("whatsapp"));setInboxes(wa.length?wa:(j.inboxes||[]));}catch{setInboxes([]);setErr("Couldn't load your WhatsApp numbers.");}};useEffect(()=>{loadInboxes();},[]);if(picked)return<TemplatesList inbox={picked} onBack={()=>setPicked(null)}/>;return(<div style={{minHeight:"100vh",background:D.bg,fontFamily:T.font,color:D.text}}><div style={{maxWidth:1180,margin:"0 auto",padding:isMobile?"18px 16px 44px":"22px 24px 50px"}}><Crumb items={[{label:"Dashboard"},{label:"Manage"},{label:"WhatsApp Templates",active:true}]}/><div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:18,flexWrap:"wrap"}}><div><div style={{fontSize:isMobile?19:22,fontWeight:700,letterSpacing:"-.01em",display:"flex",alignItems:"center",gap:8}}>WhatsApp Templates<Tip push={false} text={PAGE_HELP.templates}/></div><div style={{fontSize:13,color:D.sub,marginTop:3}}>Manage message templates for each of your numbers</div></div><button className="cs-pub" onClick={()=>{setInboxes(null);setSyncKey((k)=>k+1);loadInboxes();}} style={tBtnGhost}>↻ Sync Numbers</button></div>{err&&<Bnr kind="err" onX={()=>setErr("")}>{err}</Bnr>}{inboxes===null&&<div style={{color:D.sub,fontSize:13,padding:40,textAlign:"center",border:`1px solid ${D.border}`,borderRadius:12,background:D.card}}>Loading numbers…</div>}{inboxes&&inboxes.length===0&&<Empty icon="📞" title="No WhatsApp numbers found" sub="Connect a WhatsApp Cloud number in ChatsSync first, then come back to create templates."/>}{inboxes&&inboxes.length>0&&(isMobile?(<div style={{display:"flex",flexDirection:"column",gap:12}}>{inboxes.map((ib)=><NumberRow key={ib.id} inbox={ib} syncKey={syncKey} isMobile onManage={()=>setPicked(ib)}/>)}</div>):(<div style={{border:`1px solid ${D.border}`,borderRadius:12,overflow:"hidden",background:D.card}}><div style={{display:"grid",gridTemplateColumns:TPL_NUM_COLS,padding:"11px 18px",background:D.panel2,fontSize:11.5,fontWeight:700,color:D.sub,textTransform:"uppercase",letterSpacing:".04em"}}><div>Verified Name</div><div>Business App</div><div>Phone Number</div><div>WABA ID</div><div style={{textAlign:"center"}}>Templates</div><div style={{textAlign:"right"}}>Actions</div></div>{inboxes.map((ib)=><NumberRow key={ib.id} inbox={ib} syncKey={syncKey} onManage={()=>setPicked(ib)}/>)}</div>))}</div></div>);}
 
 function NumberRow({inbox,onManage,syncKey,isMobile}){const[meta,setMeta]=useState(null);const[count,setCount]=useState(null);useEffect(()=>{let alive=true;(async()=>{try{const j=await(await fetch(`${API}/api/templates/meta?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json();if(alive&&j.ok)setMeta(j);}catch{}})();(async()=>{try{const j=await(await fetch(`${API}/api/templates?account_id=${ACCOUNT_ID}&inbox_id=${inbox.id}`)).json();if(alive&&j.ok)setCount((j.templates||[]).length);}catch{}})();return()=>{alive=false;};},[inbox.id,syncKey]);const dot=<span style={{width:8,height:8,borderRadius:"50%",flexShrink:0,background:meta?"#34d399":D.faint,boxShadow:meta?"0 0 7px rgba(52,211,153,.6)":"none"}}/>;const cloud=<span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:7,fontSize:11.5,fontWeight:600,background:hexA(ACCENT,.12),color:"#9ec1ff",border:`1px solid ${hexA(ACCENT,.25)}`}}>☁ Cloud API</span>;const cnt=<span style={{fontSize:12.5,fontWeight:700,color:count==null?D.faint:D.text,padding:"2px 11px",borderRadius:999,background:D.panel2,border:`1px solid ${D.border}`}}>{count==null?"…":count}</span>;if(isMobile){return(<div style={{background:D.card,border:`1px solid ${D.border}`,borderRadius:12,padding:14}}><div style={{display:"flex",alignItems:"center",gap:9,marginBottom:12}}>{dot}<span title={inbox.name} style={{fontSize:15,fontWeight:600,color:"#f0a868",flex:1,minWidth:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inbox.name}</span>{cloud}</div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:13}}><Kv label="Phone"><CopyCell value={meta?.phone}/></Kv><Kv label="WABA ID"><CopyCell value={meta?.waba_id} mono/></Kv><Kv label="Templates">{cnt}</Kv></div><button className="cs-pub" onClick={onManage} style={{...tBtnPri,width:"100%",justifyContent:"center"}}>Manage Templates →</button></div>);}return(<div className="cs-row" style={{display:"grid",gridTemplateColumns:TPL_NUM_COLS,alignItems:"center",padding:"13px 18px",borderTop:`1px solid ${D.border}`}}><div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>{dot}<span title={inbox.name} style={{fontSize:14,fontWeight:600,color:"#f0a868",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inbox.name}</span></div><div>{cloud}</div><div style={{minWidth:0}}><CopyCell value={meta?.phone}/></div><div style={{minWidth:0}}><CopyCell value={meta?.waba_id} mono/></div><div style={{textAlign:"center"}}>{cnt}</div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button className="cs-pub" onClick={onManage} style={{...tBtnPri,padding:"7px 15px"}}>Manage →</button></div></div>);}
 function Kv({label,children}){return(<div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:11,fontWeight:700,color:D.faint,textTransform:"uppercase",letterSpacing:".04em",minWidth:78}}>{label}</span><div style={{minWidth:0,flex:1}}>{children}</div></div>);}
